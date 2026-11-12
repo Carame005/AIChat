@@ -1,0 +1,26 @@
+# Android / Gradle
+CaramelAI/.gradle/
+CaramelAI/.idea/
+CaramelAI/.kotlin/
+CaramelAI/**/build/
+CaramelAI/local.properties
+CaramelAI/*.iml
+CaramelAI/app/*.iml
+*.iml
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.log
+.vscode/
+.vs/
+
+# Local LLM server runtime (download on each machine)
+server/*.exe
+server/*.dll
+server/models/*.gguf
+server/models/.cache/
+server/LICENSE-LLVM-OpenMP
+
+# Leftover / empty
+Backend/

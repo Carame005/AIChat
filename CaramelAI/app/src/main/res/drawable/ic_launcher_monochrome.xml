@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Simple caramel swirl silhouette for themed icons -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,28c-14,0 -26,12 -26,26c0,14 12,26 26,26c10,0 19,-6 23,-14c-4,3 -9,5 -14,5c-11,0 -20,-9 -20,-20s9,-20 20,-20c5,0 10,2 14,5c-4,-8 -13,-14 -23,-14z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,42c-7,0 -12,5 -12,12s5,12 12,12c4,0 8,-2 10,-5c-2,1 -4,2 -6,2c-5,0 -9,-4 -9,-9s4,-9 9,-9c2,0 4,1 6,2c-2,-3 -6,-5 -10,-5z" />
+</vector>
