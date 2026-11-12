@@ -34,7 +34,7 @@ Repositorio pensado para clonar en otro PC, descargar modelo + binarios del serv
 ## 1. Clonar el repo
 
 ```bat
-git clone https://github.com/Carame0005/AIChat.git
+git clone https://github.com/Carame005/AIChat.git
 cd AIChat
 ```
 
@@ -150,4 +150,4 @@ AIChat/
 - El GGUF y `llama-server.exe` **no están en Git** (pesan mucho). Hay que descargarlos en cada PC.
 - Con poca VRAM (p. ej. 4 GB) el 12B Q4 irá lento (parte en CPU); es normal.
 - Para acceso fuera de casa, Tailscale (u otra VPN) es más seguro que abrir el puerto al público.
-- Autor GitHub: [Carame0005](https://github.com/Carame0005)
+- Autor GitHub: [Carame005](https://github.com/Carame005)
