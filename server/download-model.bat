@@ -1,5 +1,6 @@
 @echo off
-REM Downloads Chaos-Unknown-12B Q4_K_M GGUF for llama-server (RTX 3060 12GB).
+REM Downloads Chaos-Unknown-12B Q4_K_M GGUF for llama-server (good for ~8–12 GB VRAM / laptop).
+REM For higher quality on a desktop 3060 12 GB, also run download-model-q5.bat.
 REM Source model: https://huggingface.co/Vortex5/Chaos-Unknown-12b
 REM GGUF quant:   https://huggingface.co/mradermacher/Chaos-Unknown-12b-GGUF
 

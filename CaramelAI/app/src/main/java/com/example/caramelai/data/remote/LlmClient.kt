@@ -49,6 +49,11 @@ class LlmClient(
         .readTimeout(10, TimeUnit.SECONDS)
         .build()
 
+    /** Completions may wait for router model load + generation. */
+    private val completeClient: OkHttpClient = client.newBuilder()
+        .readTimeout(5, TimeUnit.MINUTES)
+        .build()
+
     suspend fun health(baseUrl: String, apiKey: String): Result<String> {
         val trimmed = baseUrl.trim().trimEnd('/')
         if (trimmed.isBlank()) {
@@ -99,13 +104,58 @@ class LlmClient(
         }
     }
 
+    suspend fun listModels(baseUrl: String, apiKey: String): Result<List<String>> {
+        val trimmed = baseUrl.trim().trimEnd('/')
+        if (trimmed.isBlank()) {
+            return Result.failure(IOException("Base URL is empty"))
+        }
+        val url = "$trimmed/v1/models"
+        return suspendCancellableCoroutine { cont ->
+            val builder = Request.Builder().url(url).get()
+            if (apiKey.isNotBlank()) {
+                builder.header("Authorization", "Bearer $apiKey")
+            }
+            val call = healthClient.newCall(builder.build())
+            cont.invokeOnCancellation { call.cancel() }
+            call.enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    if (!cont.isActive) return
+                    cont.resume(Result.failure(e))
+                }
+
+                override fun onResponse(call: Call, response: Response) {
+                    response.use {
+                        val body = it.body?.string().orEmpty()
+                        if (!it.isSuccessful) {
+                            cont.resume(
+                                Result.failure(IOException("HTTP ${it.code} from $url: $body")),
+                            )
+                            return
+                        }
+                        runCatching {
+                            json.decodeFromString(ModelsListResponse.serializer(), body)
+                                .data.map { model -> model.id }
+                        }.fold(
+                            onSuccess = { ids -> cont.resume(Result.success(ids)) },
+                            onFailure = { err ->
+                                cont.resume(Result.failure(IOException(err.message, err)))
+                            },
+                        )
+                    }
+                }
+            })
+        }
+    }
+
     suspend fun complete(
         baseUrl: String,
         apiKey: String,
+        model: String,
         messages: List<ChatMessageDto>,
         params: GenerationParams,
     ): Result<String> {
         val requestBody = ChatCompletionRequest(
+            model = model,
             messages = messages,
             stream = false,
             temperature = params.temperature.toDouble(),
@@ -125,7 +175,7 @@ class LlmClient(
             if (apiKey.isNotBlank()) {
                 builder.header("Authorization", "Bearer $apiKey")
             }
-            val call = healthClient.newCall(builder.build())
+            val call = completeClient.newCall(builder.build())
             cont.invokeOnCancellation { call.cancel() }
             call.enqueue(object : Callback {
                 override fun onFailure(call: Call, e: IOException) {
@@ -166,10 +216,12 @@ class LlmClient(
     fun streamChat(
         baseUrl: String,
         apiKey: String,
+        model: String,
         messages: List<ChatMessageDto>,
         params: GenerationParams,
     ): Flow<ChatStreamEvent> = callbackFlow {
         val requestBody = ChatCompletionRequest(
+            model = model,
             messages = messages,
             stream = true,
             temperature = params.temperature.toDouble(),

@@ -11,6 +11,7 @@ data class ChatMessageDto(
 
 @Serializable
 data class ChatCompletionRequest(
+    val model: String,
     val messages: List<ChatMessageDto>,
     val stream: Boolean = true,
     val temperature: Double? = null,
@@ -19,6 +20,16 @@ data class ChatCompletionRequest(
     @SerialName("min_p") val minP: Double? = null,
     @SerialName("repeat_penalty") val repeatPenalty: Double? = null,
     @SerialName("max_tokens") val maxTokens: Int? = null,
+)
+
+@Serializable
+data class ModelsListResponse(
+    val data: List<RemoteModelInfo> = emptyList(),
+)
+
+@Serializable
+data class RemoteModelInfo(
+    val id: String,
 )
 
 @Serializable

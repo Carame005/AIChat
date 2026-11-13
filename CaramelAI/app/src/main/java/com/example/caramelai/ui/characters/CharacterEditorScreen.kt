@@ -31,8 +31,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.caramelai.R
 import com.example.caramelai.ui.components.Avatar
 import com.example.caramelai.ui.components.CaramelButton
 import com.example.caramelai.ui.components.CaramelButtonStyle
@@ -51,6 +53,8 @@ fun CharacterEditorScreen(
     val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
     val colors = LocalCaramelColors.current
+    val savedMessage = stringResource(R.string.editor_saved)
+    val jsonCopiedMessage = stringResource(R.string.editor_json_copied)
 
     val avatarLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
@@ -70,14 +74,14 @@ fun CharacterEditorScreen(
         viewModel.events.collect { event ->
             when (event) {
                 CharacterEditorViewModel.EditorEvent.Saved -> {
-                    snackbar.showSnackbar("Guardado")
+                    snackbar.showSnackbar(savedMessage)
                     onBack()
                 }
                 is CharacterEditorViewModel.EditorEvent.Exported -> {
                     val clipboard =
                         context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                     clipboard.setPrimaryClip(ClipData.newPlainText("character.json", event.json))
-                    snackbar.showSnackbar("JSON copiado al portapapeles")
+                    snackbar.showSnackbar(jsonCopiedMessage)
                 }
                 is CharacterEditorViewModel.EditorEvent.Error ->
                     snackbar.showSnackbar(event.message)
@@ -86,9 +90,9 @@ fun CharacterEditorScreen(
     }
 
     val stepTitle = when (state.step) {
-        0 -> "Identidad"
-        1 -> "Personalidad"
-        else -> "Diálogo"
+        0 -> stringResource(R.string.editor_step_identity)
+        1 -> stringResource(R.string.editor_step_personality)
+        else -> stringResource(R.string.editor_step_dialogue)
     }
 
     Box(
@@ -104,7 +108,9 @@ fun CharacterEditorScreen(
                     .padding(horizontal = 8.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TextButton(onClick = onBack) { Text("Cancelar") }
+                TextButton(onClick = onBack) {
+                    Text(stringResource(R.string.action_cancel))
+                }
             }
             StepProgressBar(
                 stepCount = 3,
@@ -134,24 +140,27 @@ fun CharacterEditorScreen(
             ) {
                 when (state.step) {
                     0 -> {
-                        Text("Imagen", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            stringResource(R.string.editor_image),
+                            style = MaterialTheme.typography.titleMedium,
+                        )
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(16.dp),
                         ) {
                             Avatar(
                                 uri = state.avatarUri,
-                                contentDescription = "Avatar",
+                                contentDescription = stringResource(R.string.cd_avatar),
                                 size = 88.dp,
                             )
                             Column {
                                 Text(
-                                    "Sube una imagen para tu Chat AI",
+                                    stringResource(R.string.editor_upload_hint),
                                     color = colors.muted,
                                     style = MaterialTheme.typography.bodyMedium,
                                 )
                                 CaramelButton(
-                                    text = "Subir",
+                                    text = stringResource(R.string.editor_upload),
                                     onClick = { avatarLauncher.launch(arrayOf("image/*")) },
                                     style = CaramelButtonStyle.Secondary,
                                     modifier = Modifier.padding(top = 8.dp),
@@ -159,9 +168,9 @@ fun CharacterEditorScreen(
                             }
                         }
                         GenerateableField(
-                            label = "Nombre",
+                            label = stringResource(R.string.editor_name),
                             value = state.name,
-                            placeholder = "Añade un nombre para tu Chat AI",
+                            placeholder = stringResource(R.string.editor_name_placeholder),
                             singleLine = true,
                             generating = state.generatingField == CharacterField.Name,
                             onValueChange = viewModel::updateName,
@@ -171,27 +180,27 @@ fun CharacterEditorScreen(
 
                     1 -> {
                         GenerateableField(
-                            label = "Descripción",
+                            label = stringResource(R.string.editor_description),
                             value = state.description,
-                            placeholder = "Describe al personaje",
+                            placeholder = stringResource(R.string.editor_description_placeholder),
                             minLines = 3,
                             generating = state.generatingField == CharacterField.Description,
                             onValueChange = viewModel::updateDescription,
                             onGenerate = { viewModel.generateField(CharacterField.Description) },
                         )
                         GenerateableField(
-                            label = "Personalidad",
+                            label = stringResource(R.string.editor_personality),
                             value = state.personality,
-                            placeholder = "Rasgos, tono, estilo",
+                            placeholder = stringResource(R.string.editor_personality_placeholder),
                             minLines = 3,
                             generating = state.generatingField == CharacterField.Personality,
                             onValueChange = viewModel::updatePersonality,
                             onGenerate = { viewModel.generateField(CharacterField.Personality) },
                         )
                         GenerateableField(
-                            label = "Escenario",
+                            label = stringResource(R.string.editor_scenario),
                             value = state.scenario,
-                            placeholder = "Contexto de la escena",
+                            placeholder = stringResource(R.string.editor_scenario_placeholder),
                             minLines = 2,
                             generating = state.generatingField == CharacterField.Scenario,
                             onValueChange = viewModel::updateScenario,
@@ -201,27 +210,27 @@ fun CharacterEditorScreen(
 
                     else -> {
                         GenerateableField(
-                            label = "Primer mensaje",
+                            label = stringResource(R.string.editor_greeting),
                             value = state.greeting,
-                            placeholder = "El primer mensaje con el que abre conversaciones",
+                            placeholder = stringResource(R.string.editor_greeting_placeholder),
                             minLines = 3,
                             generating = state.generatingField == CharacterField.Greeting,
                             onValueChange = viewModel::updateGreeting,
                             onGenerate = { viewModel.generateField(CharacterField.Greeting) },
                         )
                         GenerateableField(
-                            label = "Memoria / diálogo de ejemplo",
+                            label = stringResource(R.string.editor_example),
                             value = state.exampleDialogue,
-                            placeholder = "Trasfondo, rasgos u otros detalles a recordar",
+                            placeholder = stringResource(R.string.editor_example_placeholder),
                             minLines = 3,
                             generating = state.generatingField == CharacterField.ExampleDialogue,
                             onValueChange = viewModel::updateExampleDialogue,
                             onGenerate = { viewModel.generateField(CharacterField.ExampleDialogue) },
                         )
                         GenerateableField(
-                            label = "System prompt (opcional)",
+                            label = stringResource(R.string.editor_system_prompt),
                             value = state.systemPrompt,
-                            placeholder = "Instrucciones extras del sistema",
+                            placeholder = stringResource(R.string.editor_system_prompt_placeholder),
                             minLines = 2,
                             generating = state.generatingField == CharacterField.SystemPrompt,
                             onValueChange = viewModel::updateSystemPrompt,
@@ -239,20 +248,20 @@ fun CharacterEditorScreen(
             ) {
                 if (state.step < 2) {
                     CaramelButton(
-                        text = "Continuar",
+                        text = stringResource(R.string.action_continue),
                         onClick = viewModel::nextStep,
                         enabled = state.step > 0 || state.name.isNotBlank(),
                         modifier = Modifier.fillMaxWidth(),
                     )
                 } else {
                     CaramelButton(
-                        text = "Guardar",
+                        text = stringResource(R.string.action_save),
                         onClick = viewModel::save,
                         enabled = state.name.isNotBlank(),
                         modifier = Modifier.fillMaxWidth(),
                     )
                     CaramelButton(
-                        text = "Exportar JSON",
+                        text = stringResource(R.string.editor_export_json),
                         onClick = viewModel::export,
                         style = CaramelButtonStyle.Secondary,
                         modifier = Modifier.fillMaxWidth(),
@@ -260,7 +269,7 @@ fun CharacterEditorScreen(
                 }
                 if (state.step > 0) {
                     CaramelButton(
-                        text = "Atrás",
+                        text = stringResource(R.string.action_back),
                         onClick = viewModel::prevStep,
                         style = CaramelButtonStyle.Ghost,
                         modifier = Modifier.fillMaxWidth(),
@@ -283,6 +292,7 @@ private fun GenerateableField(
     minLines: Int = 1,
     singleLine: Boolean = false,
 ) {
+    val generateLabel = stringResource(R.string.editor_generate)
     CaramelTextField(
         value = value,
         onValueChange = onValueChange,
@@ -295,7 +305,7 @@ private fun GenerateableField(
             if (generating) {
                 CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
             } else {
-                FieldActionChip(text = "Generar", onClick = onGenerate)
+                FieldActionChip(text = generateLabel, onClick = onGenerate)
             }
         },
     )

@@ -67,6 +67,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -111,6 +112,7 @@ fun ChatScreen(
     val dateFormat = remember {
         DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT)
     }
+    val specsCopiedMessage = stringResource(R.string.chat_specs_copied)
 
     LaunchedEffect(messages.size, uiState.streamingText, uiState.isGenerating) {
         val extra = when {
@@ -134,7 +136,7 @@ fun ChatScreen(
                     clipboard.setPrimaryClip(
                         ClipData.newPlainText("character.json", event.json),
                     )
-                    snackbar.showSnackbar("Especificaciones copiadas al portapapeles")
+                    snackbar.showSnackbar(specsCopiedMessage)
                 }
             }
         }
@@ -153,7 +155,10 @@ fun ChatScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Atrás")
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = stringResource(R.string.cd_back),
+                    )
                 }
                 Row(
                     modifier = Modifier
@@ -170,7 +175,7 @@ fun ChatScreen(
                         rounded = false,
                     )
                     Text(
-                        text = character?.name ?: "Chat",
+                        text = character?.name ?: stringResource(R.string.chat_fallback_title),
                         style = MaterialTheme.typography.titleMedium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -244,7 +249,7 @@ fun ChatScreen(
                 ) {
                     Avatar(
                         uri = activePersona?.avatarUri,
-                        contentDescription = "Persona",
+                        contentDescription = stringResource(R.string.persona_editor_title),
                         size = 36.dp,
                         rounded = false,
                     )
@@ -272,7 +277,7 @@ fun ChatScreen(
                         decorationBox = { inner ->
                             Box {
                                 if (uiState.draft.isEmpty()) {
-                                    Text("Mensaje…", color = colors.muted)
+                                    Text("Message…", color = colors.muted)
                                 }
                                 inner()
                             }
@@ -281,7 +286,7 @@ fun ChatScreen(
                 }
                 if (uiState.isGenerating) {
                     IconButton(onClick = viewModel::stop) {
-                        Icon(Icons.Default.Stop, contentDescription = "Parar")
+                        Icon(Icons.Default.Stop, contentDescription = "Stop")
                     }
                 } else {
                     val empty = uiState.draft.isBlank()
@@ -290,7 +295,11 @@ fun ChatScreen(
                             painter = painterResource(
                                 if (empty) R.drawable.ic_continue else R.drawable.ic_send,
                             ),
-                            contentDescription = if (empty) "Continuar" else "Enviar",
+                            contentDescription = if (empty) {
+                                stringResource(R.string.cd_continue)
+                            } else {
+                                stringResource(R.string.cd_send)
+                            },
                             tint = colors.accentStart,
                         )
                     }
@@ -341,13 +350,13 @@ fun ChatScreen(
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Text("Historial de chats", style = MaterialTheme.typography.titleLarge)
+                Text(stringResource(R.string.chat_history_title), style = MaterialTheme.typography.titleLarge)
                 TextButton(onClick = {
                     showHistory = false
                     viewModel.createNewChat()
                 }) {
                     Icon(Icons.Default.Add, contentDescription = null)
-                    Text("  Nuevo chat")
+                    Text("  ${stringResource(R.string.chat_new_chat)}")
                 }
                 conversations.forEach { conversation ->
                     Row(
@@ -390,7 +399,7 @@ fun ChatScreen(
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Text("Elegir persona", style = MaterialTheme.typography.titleLarge)
+                Text(stringResource(R.string.chat_pick_persona), style = MaterialTheme.typography.titleLarge)
                 personas.forEach { persona ->
                     PersonaPickRow(
                         persona = persona,
@@ -403,7 +412,7 @@ fun ChatScreen(
                 }
                 if (personas.isEmpty()) {
                     Text(
-                        "Crea una persona en Perfil para usarla aquí.",
+                        stringResource(R.string.chat_pick_persona_empty),
                         color = colors.muted,
                     )
                 }
@@ -428,21 +437,21 @@ fun ChatScreen(
                     menuMessage = null
                 }) {
                     Icon(Icons.Default.ContentCopy, contentDescription = null)
-                    Text("  Copiar")
+                    Text("  Copy")
                 }
                 TextButton(onClick = {
                     viewModel.beginEdit(message)
                     menuMessage = null
                 }) {
                     Icon(Icons.Default.Edit, contentDescription = null)
-                    Text("  Editar")
+                    Text("  ${stringResource(R.string.action_edit)}")
                 }
                 TextButton(onClick = {
                     viewModel.deleteMessage(message.id)
                     menuMessage = null
                 }) {
                     Icon(Icons.Default.Delete, contentDescription = null)
-                    Text("  Borrar")
+                    Text("  ${stringResource(R.string.action_delete)}")
                 }
                 if (isLastAssistant) {
                     TextButton(onClick = {
@@ -453,7 +462,7 @@ fun ChatScreen(
                             painter = painterResource(R.drawable.ic_regenerate),
                             contentDescription = null,
                         )
-                        Text("  Regenerar")
+                        Text("  Regenerate")
                     }
                 }
                 TextButton(onClick = {
@@ -464,7 +473,7 @@ fun ChatScreen(
                         painter = painterResource(R.drawable.ic_branch),
                         contentDescription = null,
                     )
-                    Text("  Nuevo chat desde aquí")
+                    Text("  New chat from here")
                 }
             }
         }
@@ -473,7 +482,7 @@ fun ChatScreen(
     if (uiState.editingMessageId != null) {
         AlertDialog(
             onDismissRequest = viewModel::cancelEdit,
-            title = { Text("Editar mensaje") },
+            title = { Text(stringResource(R.string.chat_edit_message)) },
             text = {
                 OutlinedTextField(
                     value = uiState.editingText,
@@ -483,10 +492,14 @@ fun ChatScreen(
                 )
             },
             confirmButton = {
-                TextButton(onClick = viewModel::commitEdit) { Text("Guardar") }
+                TextButton(onClick = viewModel::commitEdit) {
+                    Text(stringResource(R.string.action_save))
+                }
             },
             dismissButton = {
-                TextButton(onClick = viewModel::cancelEdit) { Text("Cancelar") }
+                TextButton(onClick = viewModel::cancelEdit) {
+                    Text(stringResource(R.string.action_cancel))
+                }
             },
         )
     }
@@ -504,7 +517,7 @@ private fun CharacterMenuSheet(
     val colors = LocalCaramelColors.current
     val description = character?.description?.takeIf { it.isNotBlank() }
         ?: character?.personality?.takeIf { it.isNotBlank() }
-        ?: "Sin descripción"
+        ?: stringResource(R.string.chat_no_description)
 
     Column(
         modifier = Modifier
@@ -519,7 +532,7 @@ private fun CharacterMenuSheet(
                 onClick = onClose,
                 modifier = Modifier.align(Alignment.TopEnd),
             ) {
-                Icon(Icons.Default.Close, contentDescription = "Cerrar", tint = colors.muted)
+                Icon(Icons.Default.Close, contentDescription = "Close", tint = colors.muted)
             }
         }
 
@@ -530,7 +543,7 @@ private fun CharacterMenuSheet(
         )
         Spacer(Modifier.height(14.dp))
         Text(
-            text = character?.name ?: "Personaje",
+            text = character?.name ?: stringResource(R.string.chat_character_fallback),
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center,
@@ -555,12 +568,12 @@ private fun CharacterMenuSheet(
         ) {
             Icon(
                 Icons.Default.Share,
-                contentDescription = "Exportar especificaciones",
+                contentDescription = stringResource(R.string.cd_export_specs),
                 tint = MaterialTheme.colorScheme.onSurface,
             )
         }
         Text(
-            text = "Guardar para importar",
+            text = stringResource(R.string.chat_save_for_import),
             style = MaterialTheme.typography.labelSmall,
             color = colors.muted,
             modifier = Modifier.padding(top = 4.dp, bottom = 18.dp),
@@ -568,19 +581,19 @@ private fun CharacterMenuSheet(
 
         CharacterMenuItem(
             icon = Icons.Default.Person,
-            label = "Ver perfil del personaje",
+            label = stringResource(R.string.chat_view_character),
             onClick = onViewProfile,
         )
         Spacer(Modifier.height(10.dp))
         CharacterMenuItem(
             icon = Icons.Default.History,
-            label = "Historial de chats",
+            label = stringResource(R.string.chat_history),
             onClick = onHistory,
         )
         Spacer(Modifier.height(10.dp))
         CharacterMenuItem(
             icon = Icons.Default.Add,
-            label = "Iniciar nuevo chat",
+            label = stringResource(R.string.chat_new_chat),
             onClick = onNewChat,
             accent = true,
         )

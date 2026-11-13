@@ -221,6 +221,7 @@ class ChatRepository(
         llmClient.streamChat(
             baseUrl = settings.baseUrl,
             apiKey = settings.apiKey,
+            model = settings.modelId,
             messages = messages,
             params = params,
         ).collect { emit(it) }

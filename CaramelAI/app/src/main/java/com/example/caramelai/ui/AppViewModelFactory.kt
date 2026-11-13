@@ -38,6 +38,7 @@ class AppViewModelFactory(
 
             modelClass.isAssignableFrom(PersonaEditorViewModel::class.java) ->
                 PersonaEditorViewModel(
+                    application = container.application,
                     personaId = requireNotNull(personaId),
                     personaRepository = container.personaRepository,
                     settingsRepository = container.settingsRepository,
@@ -45,6 +46,7 @@ class AppViewModelFactory(
 
             modelClass.isAssignableFrom(CharacterEditorViewModel::class.java) ->
                 CharacterEditorViewModel(
+                    application = container.application,
                     characterId = requireNotNull(characterId),
                     characterRepository = container.characterRepository,
                     llmClient = container.llmClient,
@@ -53,6 +55,7 @@ class AppViewModelFactory(
 
             modelClass.isAssignableFrom(ChatViewModel::class.java) ->
                 ChatViewModel(
+                    application = container.application,
                     conversationId = requireNotNull(conversationId),
                     characterId = requireNotNull(characterId),
                     chatRepository = container.chatRepository,
@@ -65,6 +68,7 @@ class AppViewModelFactory(
                 SettingsViewModel(
                     settingsRepository = container.settingsRepository,
                     connectionChecker = container.connectionChecker,
+                    llmClient = container.llmClient,
                 ) as T
 
             else -> error("Unknown ViewModel: ${modelClass.name}")

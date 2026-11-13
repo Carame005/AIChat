@@ -1,7 +1,9 @@
 package com.example.caramelai.ui.chat
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.caramelai.R
 import com.example.caramelai.data.db.CharacterEntity
 import com.example.caramelai.data.db.ConversationEntity
 import com.example.caramelai.data.db.MessageEntity
@@ -35,13 +37,14 @@ data class ChatUiState(
 )
 
 class ChatViewModel(
+    application: Application,
     private val conversationId: String,
     private val characterId: String,
     private val chatRepository: ChatRepository,
     private val characterRepository: CharacterRepository,
     private val personaRepository: PersonaRepository,
     private val settingsRepository: SettingsRepository,
-) : ViewModel() {
+) : AndroidViewModel(application) {
     val character: StateFlow<CharacterEntity?> =
         characterRepository.observeById(characterId)
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
@@ -236,7 +239,11 @@ class ChatViewModel(
             }.onSuccess { branched ->
                 _events.emit(ChatEvent.OpenConversation(branched.id))
             }.onFailure {
-                _events.emit(ChatEvent.Error(it.message ?: "No se pudo crear la rama"))
+                _events.emit(
+                    ChatEvent.Error(
+                        it.message ?: getApplication<Application>().getString(R.string.chat_branch_failed),
+                    ),
+                )
             }
         }
     }
@@ -245,7 +252,11 @@ class ChatViewModel(
         viewModelScope.launch {
             val current = characterRepository.getById(characterId)
             if (current == null) {
-                _events.emit(ChatEvent.Error("Personaje no encontrado"))
+                _events.emit(
+                    ChatEvent.Error(
+                        getApplication<Application>().getString(R.string.chat_character_missing),
+                    ),
+                )
                 return@launch
             }
             val json = characterRepository.exportJson(current)
@@ -299,7 +310,7 @@ class ChatViewModel(
                 if (finishReason.equals("length", ignoreCase = true)) {
                     _events.emit(
                         ChatEvent.Error(
-                            "Respuesta cortada por el límite de tokens. Pulsa Continuar para seguir.",
+                            getApplication<Application>().getString(R.string.chat_truncated_hint),
                         ),
                     )
                 }

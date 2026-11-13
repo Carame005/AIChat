@@ -31,7 +31,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.example.caramelai.R
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.caramelai.data.db.PersonaEntity
 import com.example.caramelai.ui.components.Avatar
@@ -63,10 +65,10 @@ fun ProfileScreen(
 
     Column(modifier = modifier.fillMaxSize()) {
         CaramelTopBar(
-            title = "Perfil",
+            title = stringResource(R.string.profile_title),
             actions = {
                 CaramelIconButton(onClick = onOpenSettings) {
-                    Icon(Icons.Default.Settings, contentDescription = "Ajustes")
+                    Icon(Icons.Default.Settings, contentDescription = stringResource(R.string.cd_settings))
                 }
             },
         )
@@ -76,9 +78,9 @@ fun ProfileScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item {
-                Text("Personas", style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.profile_personas), style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "El bot usará la persona activa para saber quién eres.",
+                    stringResource(R.string.profile_personas_hint),
                     color = colors.muted,
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -96,7 +98,7 @@ fun ProfileScreen(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Add, contentDescription = null, tint = colors.accentStart)
                         Text(
-                            "Nueva persona",
+                            stringResource(R.string.profile_new_persona),
                             modifier = Modifier.padding(start = 12.dp),
                             color = colors.accentStart,
                         )
@@ -105,7 +107,7 @@ fun ProfileScreen(
             }
             item {
                 Text(
-                    "Tema",
+                    stringResource(R.string.profile_theme),
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.padding(top = 8.dp),
                 )
@@ -147,7 +149,7 @@ fun ProfileScreen(
                     ) {
                         Icon(Icons.Default.Settings, contentDescription = null)
                         Text(
-                            "Conexión y generación",
+                            stringResource(R.string.profile_connection_generation),
                             modifier = Modifier
                                 .weight(1f)
                                 .padding(horizontal = 12.dp),
@@ -168,6 +170,7 @@ private fun PersonaRow(
     onSetDefault: () -> Unit,
 ) {
     val colors = LocalCaramelColors.current
+    val defaultBadge = stringResource(R.string.profile_default_badge)
     CaramelCard(onClick = onClick) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -183,7 +186,7 @@ private fun PersonaRow(
                     Text(persona.name, style = MaterialTheme.typography.titleMedium)
                     if (isDefault) {
                         Text(
-                            "  Predeterminada",
+                            "  $defaultBadge",
                             color = colors.accentStart,
                             style = MaterialTheme.typography.labelSmall,
                         )
@@ -203,7 +206,7 @@ private fun PersonaRow(
                 CaramelIconButton(onClick = onSetDefault) {
                     Icon(
                         Icons.Default.Check,
-                        contentDescription = "Hacer predeterminada",
+                        contentDescription = stringResource(R.string.cd_make_default),
                         tint = colors.muted,
                     )
                 }

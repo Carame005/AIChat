@@ -46,6 +46,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import com.example.caramelai.R
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -71,6 +73,7 @@ fun CharacterListScreen(
     val context = LocalContext.current
     val colors = LocalCaramelColors.current
     val layout = settings.botListLayout
+    val importedFmt = stringResource(R.string.characters_imported)
 
     val importLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
@@ -90,7 +93,7 @@ fun CharacterListScreen(
                 is CharacterListViewModel.ListEvent.OpenChat ->
                     onOpenCharacter(event.characterId, event.conversationId)
                 is CharacterListViewModel.ListEvent.Imported ->
-                    snackbar.showSnackbar("Imported ${event.name}")
+                    snackbar.showSnackbar(importedFmt.format(event.name))
                 is CharacterListViewModel.ListEvent.Error ->
                     snackbar.showSnackbar(event.message)
             }
@@ -100,7 +103,7 @@ fun CharacterListScreen(
     Box(modifier = modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
             CaramelTopBar(
-                title = "CaramelAI",
+                title = stringResource(R.string.app_name),
                 actions = {
                     CaramelIconButton(
                         onClick = {
@@ -113,13 +116,13 @@ fun CharacterListScreen(
                         Icon(
                             if (layout == BotListLayout.GRID) Icons.Default.ViewList
                             else Icons.Default.GridView,
-                            contentDescription = "Cambiar vista",
+                            contentDescription = stringResource(R.string.cd_toggle_layout),
                         )
                     }
                     CaramelIconButton(onClick = {
                         importLauncher.launch(arrayOf("application/json", "text/*", "*/*"))
                     }) {
-                        Icon(Icons.Default.UploadFile, contentDescription = "Importar")
+                        Icon(Icons.Default.UploadFile, contentDescription = stringResource(R.string.cd_import))
                     }
                 },
             )
@@ -130,7 +133,7 @@ fun CharacterListScreen(
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        text = "Crea un personaje para empezar a chatear",
+                        text = stringResource(R.string.characters_empty),
                         style = MaterialTheme.typography.bodyLarge,
                         color = colors.muted,
                     )
@@ -176,7 +179,11 @@ fun CharacterListScreen(
                 .padding(16.dp),
             containerColor = colors.accentStart,
         ) {
-            Icon(Icons.Default.Add, contentDescription = "Nuevo personaje", tint = MaterialTheme.colorScheme.onPrimary)
+            Icon(
+                Icons.Default.Add,
+                contentDescription = stringResource(R.string.cd_new_character),
+                tint = MaterialTheme.colorScheme.onPrimary,
+            )
         }
 
         SnackbarHost(
@@ -188,16 +195,18 @@ fun CharacterListScreen(
     pendingDelete?.let { character ->
         AlertDialog(
             onDismissRequest = { pendingDelete = null },
-            title = { Text("¿Borrar ${character.name}?") },
-            text = { Text("Se eliminará el personaje y todos sus chats.") },
+            title = { Text(stringResource(R.string.characters_delete_title, character.name)) },
+            text = { Text(stringResource(R.string.characters_delete_body)) },
             confirmButton = {
                 TextButton(onClick = {
                     viewModel.deleteCharacter(character.id)
                     pendingDelete = null
-                }) { Text("Borrar") }
+                }) { Text(stringResource(R.string.action_delete)) }
             },
             dismissButton = {
-                TextButton(onClick = { pendingDelete = null }) { Text("Cancelar") }
+                TextButton(onClick = { pendingDelete = null }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
             },
         )
     }
@@ -212,6 +221,7 @@ private fun BotGridCard(
     onEdit: () -> Unit,
 ) {
     val colors = LocalCaramelColors.current
+    val editLabel = stringResource(R.string.action_edit)
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -242,7 +252,7 @@ private fun BotGridCard(
             )
         }
         Text(
-            text = "Editar",
+            text = editLabel,
             color = colors.accentStart,
             style = MaterialTheme.typography.labelSmall,
             modifier = Modifier

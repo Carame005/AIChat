@@ -20,6 +20,7 @@ server/*.exe
 server/*.dll
 server/models/*.gguf
 server/models/.cache/
+server/logs/
 server/LICENSE-LLVM-OpenMP
 
 # Leftover / empty

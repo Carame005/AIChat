@@ -35,6 +35,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import com.example.caramelai.R
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.caramelai.ui.components.Avatar
@@ -53,6 +55,9 @@ fun PersonaEditorScreen(
     val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
     val colors = LocalCaramelColors.current
+    val genderPrefix = stringResource(R.string.persona_chip_gender_prefix)
+    val appearancePrefix = stringResource(R.string.persona_chip_appearance_prefix)
+    val speciesPrefix = stringResource(R.string.persona_chip_species_prefix)
 
     val avatarLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
@@ -88,11 +93,11 @@ fun PersonaEditorScreen(
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             CaramelTopBar(
-                title = "Personaje",
+                title = stringResource(R.string.persona_editor_title),
                 onBack = onBack,
                 actions = {
                     IconButton(onClick = viewModel::delete) {
-                        Icon(Icons.Default.Delete, contentDescription = "Borrar")
+                        Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.action_delete))
                     }
                     IconButton(onClick = {}) {
                         Icon(Icons.Default.Info, contentDescription = "Info", tint = colors.muted)
@@ -110,7 +115,7 @@ fun PersonaEditorScreen(
                 Box(contentAlignment = Alignment.BottomEnd) {
                     Avatar(
                         uri = state.avatarUri,
-                        contentDescription = "Avatar",
+                        contentDescription = stringResource(R.string.cd_avatar),
                         size = 112.dp,
                     )
                     IconButton(
@@ -119,15 +124,15 @@ fun PersonaEditorScreen(
                             .size(36.dp)
                             .clip(CircleShape),
                     ) {
-                        Icon(Icons.Default.Edit, contentDescription = "Cambiar foto")
+                        Icon(Icons.Default.Edit, contentDescription = stringResource(R.string.cd_change_photo))
                     }
                 }
 
                 CaramelTextField(
                     value = state.name,
                     onValueChange = viewModel::updateName,
-                    label = "Nombre",
-                    placeholder = "Tu nombre",
+                    label = stringResource(R.string.editor_name),
+                    placeholder = stringResource(R.string.persona_name_placeholder),
                     singleLine = true,
                     maxLength = 20,
                     modifier = Modifier.fillMaxWidth(),
@@ -136,15 +141,24 @@ fun PersonaEditorScreen(
                 CaramelTextField(
                     value = state.description,
                     onValueChange = viewModel::updateDescription,
-                    label = "Descripción",
-                    placeholder = "Quién eres, aspecto, personalidad…",
+                    label = stringResource(R.string.editor_description),
+                    placeholder = stringResource(R.string.persona_description_placeholder),
                     minLines = 5,
                     maxLength = 750,
                     modifier = Modifier.fillMaxWidth(),
                     actions = {
-                        ChipButton("+ Género", onClick = { viewModel.appendChip("Género: ") })
-                        ChipButton("+ Aspecto", onClick = { viewModel.appendChip("Aspecto: ") })
-                        ChipButton("+ Especie", onClick = { viewModel.appendChip("Especie: ") })
+                        ChipButton(
+                            stringResource(R.string.persona_chip_gender),
+                            onClick = { viewModel.appendChip(genderPrefix) },
+                        )
+                        ChipButton(
+                            stringResource(R.string.persona_chip_appearance),
+                            onClick = { viewModel.appendChip(appearancePrefix) },
+                        )
+                        ChipButton(
+                            stringResource(R.string.persona_chip_species),
+                            onClick = { viewModel.appendChip(speciesPrefix) },
+                        )
                     },
                 )
 
@@ -157,14 +171,14 @@ fun PersonaEditorScreen(
                         onCheckedChange = viewModel::updateDefault,
                     )
                     Text(
-                        "Predeterminado para todos los chats",
+                        stringResource(R.string.persona_default_for_chats),
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }
             }
 
             CaramelButton(
-                text = "Guardar",
+                text = stringResource(R.string.action_save),
                 onClick = viewModel::save,
                 enabled = state.name.isNotBlank(),
                 modifier = Modifier

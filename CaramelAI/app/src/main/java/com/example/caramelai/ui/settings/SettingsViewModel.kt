@@ -2,6 +2,10 @@ package com.example.caramelai.ui.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.caramelai.data.remote.KnownLlmModel
+import com.example.caramelai.data.remote.LlmClient
+import com.example.caramelai.data.remote.LlmModels
+import com.example.caramelai.data.settings.AppLanguage
 import com.example.caramelai.data.settings.AppSettings
 import com.example.caramelai.data.settings.SettingsRepository
 import com.example.caramelai.domain.ConnectionChecker
@@ -31,9 +35,15 @@ data class SettingsTextState(
     val seeded: Boolean = false,
 )
 
+data class ModelOptionUi(
+    val model: KnownLlmModel,
+    val availableOnServer: Boolean,
+)
+
 class SettingsViewModel(
     private val settingsRepository: SettingsRepository,
     private val connectionChecker: ConnectionChecker,
+    private val llmClient: LlmClient,
 ) : ViewModel() {
     val settings: StateFlow<AppSettings> = settingsRepository.settings
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AppSettings())
@@ -43,6 +53,17 @@ class SettingsViewModel(
 
     private val _testing = MutableStateFlow(false)
     val testing: StateFlow<Boolean> = _testing.asStateFlow()
+
+    private val _refreshingModels = MutableStateFlow(false)
+    val refreshingModels: StateFlow<Boolean> = _refreshingModels.asStateFlow()
+
+    private val _modelOptions = MutableStateFlow(
+        LlmModels.known.map { ModelOptionUi(it, availableOnServer = false) },
+    )
+    val modelOptions: StateFlow<List<ModelOptionUi>> = _modelOptions.asStateFlow()
+
+    private val _serverModelIds = MutableStateFlow<Set<String>?>(null)
+    val serverModelIds: StateFlow<Set<String>?> = _serverModelIds.asStateFlow()
 
     private val _events = MutableSharedFlow<SettingsEvent>()
     val events: SharedFlow<SettingsEvent> = _events.asSharedFlow()
@@ -66,6 +87,7 @@ class SettingsViewModel(
                     )
                 }
             }
+            refreshAvailableModels()
         }
     }
 
@@ -73,6 +95,66 @@ class SettingsViewModel(
     fun updateApiKey(value: String) = updateText { it.copy(apiKey = value) }
     fun updateUserName(value: String) = updateText { it.copy(userName = value) }
     fun updateGlobalBehavior(value: String) = updateText { it.copy(globalBehavior = value) }
+
+    fun selectModel(modelId: String) {
+        viewModelScope.launch {
+            settingsRepository.update { it.copy(modelId = modelId) }
+        }
+    }
+
+    fun setLanguage(language: AppLanguage) {
+        viewModelScope.launch {
+            settingsRepository.update { it.copy(language = language) }
+            AppLanguage.apply(language)
+        }
+    }
+
+    fun refreshAvailableModels() {
+        viewModelScope.launch { refreshAvailableModelsInternal() }
+    }
+
+    private suspend fun refreshAvailableModelsInternal() {
+        textPersistJob?.cancel()
+        persistTextDraft()
+        _refreshingModels.value = true
+        val draft = _text.value
+        val baseUrl = draft.baseUrl.ifBlank { settings.value.baseUrl }
+        val apiKey = draft.apiKey.ifBlank { settings.value.apiKey }
+        val result = llmClient.listModels(baseUrl, apiKey)
+        result
+            .onSuccess { ids ->
+                val idSet = ids.toSet()
+                _serverModelIds.value = idSet
+                val options = LlmModels.known.map { known ->
+                    ModelOptionUi(
+                        model = known,
+                        availableOnServer = idSet.any { remote -> matchesModelId(known.id, remote) },
+                    )
+                }
+                _modelOptions.value = options
+                val selected = settingsRepository.settings.first().modelId
+                val selectedAvailable = options.any { it.model.id == selected && it.availableOnServer }
+                if (!selectedAvailable) {
+                    options.firstOrNull { it.availableOnServer }?.let { fallback ->
+                        settingsRepository.update { it.copy(modelId = fallback.model.id) }
+                    }
+                }
+            }
+            .onFailure {
+                _serverModelIds.value = emptySet()
+                _modelOptions.value = LlmModels.known.map {
+                    ModelOptionUi(it, availableOnServer = false)
+                }
+            }
+        _refreshingModels.value = false
+    }
+
+    private fun matchesModelId(knownId: String, remoteId: String): Boolean {
+        if (remoteId == knownId || remoteId.endsWith(knownId)) return true
+        val knownStem = knownId.removeSuffix(".gguf")
+        val remoteStem = remoteId.substringAfterLast('/').removeSuffix(".gguf")
+        return knownStem == remoteStem
+    }
 
     private fun updateText(transform: (SettingsTextState) -> SettingsTextState) {
         _text.update { transform(it).copy(seeded = true) }
@@ -125,7 +207,10 @@ class SettingsViewModel(
             persistTextDraft()
             _testing.value = true
             when (val result = connectionChecker.check()) {
-                is ConnectionResult.Ok -> _events.emit(SettingsEvent.ConnectionOk(result.detail))
+                is ConnectionResult.Ok -> {
+                    refreshAvailableModelsInternal()
+                    _events.emit(SettingsEvent.ConnectionOk(result.detail))
+                }
                 is ConnectionResult.Failed ->
                     _events.emit(SettingsEvent.ConnectionFailed(result.message))
             }

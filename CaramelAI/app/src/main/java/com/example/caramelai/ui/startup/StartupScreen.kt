@@ -21,6 +21,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -64,9 +65,9 @@ fun StartupScreen(
                         contentDescription = "CaramelAI",
                         modifier = Modifier.size(120.dp),
                     )
-                    Text("CaramelAI", style = MaterialTheme.typography.headlineMedium)
+                    Text(stringResource(R.string.app_name), style = MaterialTheme.typography.headlineMedium)
                     Text(
-                        "Conectando con el servidor…",
+                        stringResource(R.string.startup_connecting),
                         color = colors.muted,
                         style = MaterialTheme.typography.bodyMedium,
                     )
@@ -86,7 +87,7 @@ fun StartupScreen(
                         modifier = Modifier.size(140.dp),
                     )
                     Text(
-                        "No se pudo conectar",
+                        stringResource(R.string.startup_failed_title),
                         style = MaterialTheme.typography.headlineMedium,
                     )
                     Text(
@@ -97,18 +98,18 @@ fun StartupScreen(
                     )
                     Spacer(Modifier.height(8.dp))
                     CaramelButton(
-                        text = "Reintentar",
+                        text = stringResource(R.string.action_retry),
                         onClick = viewModel::check,
                         modifier = Modifier.fillMaxWidth(),
                     )
                     CaramelButton(
-                        text = "Configurar conexión",
+                        text = stringResource(R.string.startup_configure),
                         onClick = onOpenSettings,
                         modifier = Modifier.fillMaxWidth(),
                         style = CaramelButtonStyle.Secondary,
                     )
                     CaramelButton(
-                        text = "Continuar sin conexión",
+                        text = stringResource(R.string.startup_continue_offline),
                         onClick = onContinueOffline,
                         modifier = Modifier.fillMaxWidth(),
                         style = CaramelButtonStyle.Ghost,

@@ -1,153 +1,186 @@
 # CaramelAI
 
-App Android de roleplay con personajes IA. El móvil habla con un **servidor LLM local** (llama.cpp) en tu PC por la red local.
+Android roleplay app with AI characters. The phone talks to a **local LLM server** (llama.cpp) on your PC over the LAN.
 
 ```
-[ Android CaramelAI ]  --HTTP-->  [ PC: llama-server :8081 ]  -->  [ GGUF Chaos-Unknown-12B ]
+[ Android CaramelAI ]  --HTTP-->  [ PC: llama-server router :8081 ]  -->  [ Q4 / Q5 GGUF ]
 ```
 
-Repositorio pensado para clonar en otro PC, descargar modelo + binarios del servidor, compilar la app e indicar la IP del PC en Ajustes.
+Clone on another PC, download the model + server binaries, build the app, and set the PC IP in Settings.
 
 ---
 
-## Requisitos
+## Requirements
 
-### PC (servidor)
+### PC (server)
 
 - Windows 10/11
-- GPU NVIDIA con drivers recientes (recomendado; también puede ir en CPU, más lento)
-- ~8 GB libres en disco para el GGUF Q4_K_M
-- Python 3 + [Hugging Face CLI](https://huggingface.co/docs/huggingface_hub/guides/cli) para descargar el modelo:
+- NVIDIA GPU with recent drivers (recommended; CPU-only works but is slower)
+- Disk space for the GGUF(s) you want (see [Minimum specs](#minimum-specs-q4--q5) below)
+- Python 3 + [Hugging Face CLI](https://huggingface.co/docs/huggingface_hub/guides/cli) to download models:
   ```bat
   pip install -U "huggingface_hub[cli]"
   ```
-- Build **CUDA** de [llama.cpp](https://github.com/ggml-org/llama.cpp/releases) (carpeta con `llama-server.exe` y DLLs)
+- A **CUDA** build of [llama.cpp](https://github.com/ggml-org/llama.cpp/releases) (`llama-server.exe` + matching cudart DLLs)
 
-### Móvil / emulador (app)
+### Phone / emulator (app)
 
-- [Android Studio](https://developer.android.com/studio) (Ladybug o superior)
-- Dispositivo o emulador con **API 26+**
-- Misma Wi‑Fi que el PC (o Tailscale / VPN), o `10.0.2.2` si usas emulador apuntando a `localhost` del PC
+- [Android Studio](https://developer.android.com/studio) (Ladybug or newer)
+- Device or emulator with **API 26+**
+- Same Wi‑Fi as the PC (or Tailscale / VPN), or `10.0.2.2` if the emulator should reach the PC’s `localhost`
 
 ---
 
-## 1. Clonar el repo
+## Minimum specs (Q4 / Q5)
+
+Both quants are **Chaos Unknown 12B** ([mradermacher GGUF](https://huggingface.co/mradermacher/Chaos-Unknown-12b-GGUF)). Context in this project defaults to **8192** tokens.
+
+| | **Q4_K_M** | **Q5_K_M** |
+|---|---|---|
+| Download script | `server\download-model.bat` | `server\download-model-q5.bat` |
+| File | `Chaos-Unknown-12b.Q4_K_M.gguf` (~7.5 GB) | `Chaos-Unknown-12b.Q5_K_M.gguf` (~8.7 GB) |
+| **Minimum VRAM** (usable) | **6 GB** with partial offload; **8 GB+** comfortable | **10 GB** with partial offload; **12 GB** comfortable |
+| **Recommended VRAM** | 8–12 GB (e.g. RTX 3060 12 GB laptop/desktop) | **12 GB** (e.g. RTX 3060 12 GB desktop) |
+| **System RAM** | **16 GB** minimum (32 GB nicer if many layers stay on CPU) | **32 GB** recommended |
+| **CPU** | Modern 6+ cores (works on weaker CPUs if GPU holds most layers) | Prefer a strong CPU if any layers stay on RAM (e.g. Ryzen 7) |
+| **Good fit** | Laptops with ~8–12 GB VRAM; desktops wanting speed over max quality | Desktops with **12 GB VRAM** and plenty of RAM |
+| **Tight fit / slow** | **4 GB VRAM** (e.g. RTX 3050 laptop): only some layers on GPU; expect slower tokens | Not recommended under ~10 GB VRAM |
+
+Notes:
+
+- Figures assume **one chat at a time**, context **8192**, and CUDA working (matching llama.cpp CUDA build + driver).
+- Q5 needs more VRAM/RAM than Q4 for the same context; if it barely fits, lower context in the app **and** server `-c`, or stick to Q4.
+- The app picks Q4/Q5 in Settings; `start-server.bat` runs in **router mode** and loads the requested GGUF.
+
+---
+
+## 1. Clone
 
 ```bat
 git clone https://github.com/Carame005/AIChat.git
 cd AIChat
 ```
 
-(Ajusta la URL si el repo tiene otro nombre.)
+(Adjust the URL if the repo name differs.)
 
 ---
 
-## 2. Montar el servidor LLM (PC)
+## 2. Set up the LLM server (PC)
 
-### 2.1 Binarios de llama.cpp
+### 2.1 llama.cpp binaries
 
-1. Descarga un release **Windows CUDA** de llama.cpp.
-2. Copia en `server\` al menos:
+1. Download a **Windows CUDA** release of llama.cpp.
+2. Copy into `server\` at least:
    - `llama-server.exe`
-   - las DLLs que vengan en el zip (`ggml-cuda.dll`, `cublas*.dll`, etc.)
+   - the DLLs from the zip (`ggml-cuda.dll`, `cublas*.dll`, etc.)
+3. Use a **cudart** zip that matches the build **and** your driver:
+   - Driver CUDA 12.x → `win-cuda-12.4` + `cudart-...-cuda-12.4`
+   - Driver CUDA 13.x → `win-cuda-13.5` + `cudart-...-cuda-13.5`  
+   Mixing CUDA 13 binaries with a CUDA 12-only driver → CPU-only (no VRAM use).
 
-### 2.2 Modelo GGUF
+### 2.2 GGUF model(s)
 
-Desde `server\`:
+From `server\`:
 
 ```bat
 download-model.bat
+download-model-q5.bat
 ```
 
-Eso deja el archivo en:
+- Q4 → `server\models\Chaos-Unknown-12b.Q4_K_M.gguf`
+- Q5 → `server\models\Chaos-Unknown-12b.Q5_K_M.gguf`
 
-`server\models\Chaos-Unknown-12b.Q4_K_M.gguf`
+`start-server.bat` starts in router mode; choose the quant in the app Settings.
 
 ### 2.3 Firewall
 
-Permite **TCP 8081** entrante en el perfil **Privado** (solo red de confianza). No expongas el puerto a Internet.
+Allow inbound **TCP 8081** on the **Private** profile only. Do not expose the port to the public internet.
 
-### 2.4 Arrancar
+### 2.4 Start
 
-Doble clic en:
+Double-click:
 
-- `Iniciar CaramelAI Server.bat` (raíz del repo), o  
+- `Iniciar CaramelAI Server.bat` (repo root), or  
 - `server\Iniciar-Servidor.bat`
 
-Deberías ver algo como: escuchando en `0.0.0.0:8081`.
+You should see it listening on `0.0.0.0:8081`.
 
-Prueba en el PC:
+Quick check:
 
 ```bat
 curl http://127.0.0.1:8081/health
 ```
 
-API key por defecto: `caramel-local-key`  
-Contexto del servidor (`-c`): **8192** (debe coincidir con la app).
+Default API key: `caramel-local-key`  
+Server context (`-c`): **8192** (must match the app).
 
-Más detalle: [`server/README.md`](server/README.md).
+More detail: [`server/README.md`](server/README.md).
 
 ---
 
-## 3. Montar la app Android
+## 3. Set up the Android app
 
-1. Abre la carpeta `CaramelAI\` en **Android Studio**.
-2. Deja que Gradle sync descargue dependencias (crea `local.properties` solo en esa máquina; no se sube al repo).
-3. Conecta el móvil con USB debugging o arranca un emulador.
+1. Open `CaramelAI\` in **Android Studio**.
+2. Let Gradle sync (creates machine-local `local.properties`; not committed).
+3. Connect a phone with USB debugging or start an emulator.
 4. Run ▶ `app`.
 
-### Ajustes dentro de la app
+App UI language defaults to **English**; switch to Spanish in Settings if you want.
 
-| Ajuste | Valor típico |
+### In-app settings
+
+| Setting | Typical value |
 |--------|----------------|
-| Base URL | `http://<IP-LAN-del-PC>:8081` |
+| Base URL | `http://<PC-LAN-IP>:8081` |
 | API key | `caramel-local-key` |
-| Context size | `8192` (igual que `-c` del servidor) |
-| Max tokens | A tu gusto (p. ej. 512) |
+| Model | Q4 or Q5 (must exist under `server\models\`) |
+| Context size | `8192` (same as server `-c`) |
+| Max tokens | Your choice (e.g. 512) |
 
-**Cómo saber la IP del PC (Windows):**
+**PC IP on Windows:**
 
 ```bat
 ipconfig
 ```
 
-Busca la IPv4 de Wi‑Fi / Ethernet (ej. `192.168.1.42`). En la app: `http://192.168.1.42:8081`.
+Use the Wi‑Fi / Ethernet IPv4 (e.g. `192.168.1.42`) → `http://192.168.1.42:8081`.
 
-**Emulador Android oficial:** usa `http://10.0.2.2:8081` para llegar al `localhost` del PC.
+**Official Android emulator:** use `http://10.0.2.2:8081` to reach the PC’s localhost.
 
-Pulsa **Probar conexión** en Ajustes si está disponible, o envía un mensaje de prueba.
-
----
-
-## 4. Uso rápido
-
-1. Arranca el servidor en el PC y déjalo abierto.
-2. Abre CaramelAI en el móvil.
-3. Crea o importa un personaje, elige persona (perfil) y chatea.
-4. Botón enviar = mensaje nuevo; si el campo está vacío, el icono **Continuar** alarga la última respuesta del bot (útil si se cortó por tokens).
+Use **Test connection** in Settings, or send a test message.
 
 ---
 
-## Estructura del repo
+## 4. Quick use
+
+1. Start the server on the PC and leave it running.
+2. Open CaramelAI on the phone.
+3. Create or import a character, pick a persona, chat.
+4. Send = new message; empty field + **Continue** extends the last bot reply (useful after token truncation).
+
+---
+
+## Repo layout
 
 ```
 AIChat/
-├── README.md                 ← esta guía
+├── README.md
 ├── Iniciar CaramelAI Server.bat
-├── CaramelAI/                ← proyecto Android (Kotlin + Compose)
-└── server/                   ← scripts + modelos (GGUF/binarios NO van en git)
+├── CaramelAI/                ← Android app (Kotlin + Compose)
+└── server/                   ← scripts + models (GGUF/binaries not in git)
     ├── start-server.bat
     ├── download-model.bat
+    ├── download-model-q5.bat
     ├── Iniciar-Servidor.bat
     ├── README.md
-    └── models/               ← vacío en git; download-model.bat lo rellena
+    └── models/
 ```
 
 ---
 
-## Notas
+## Notes
 
-- El GGUF y `llama-server.exe` **no están en Git** (pesan mucho). Hay que descargarlos en cada PC.
-- Con poca VRAM (p. ej. 4 GB) el 12B Q4 irá lento (parte en CPU); es normal.
-- Para acceso fuera de casa, Tailscale (u otra VPN) es más seguro que abrir el puerto al público.
-- Autor GitHub: [Carame005](https://github.com/Carame005)
+- GGUF files and `llama-server.exe` are **not** in Git (too large). Download them per machine.
+- With little VRAM (e.g. 4 GB), Q4 will be slow (many layers on CPU). On a 12 GB desktop, try Q5 from Settings.
+- For access away from home, Tailscale (or another VPN) is safer than opening the LLM port publicly.
+- Author: [Carame005](https://github.com/Carame005)

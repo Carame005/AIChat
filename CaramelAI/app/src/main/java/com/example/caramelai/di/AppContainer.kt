@@ -1,5 +1,6 @@
 package com.example.caramelai.di
 
+import android.app.Application
 import android.content.Context
 import com.example.caramelai.data.db.AppDatabase
 import com.example.caramelai.data.remote.LlmClient
@@ -12,6 +13,7 @@ import com.example.caramelai.domain.PromptBuilder
 
 class AppContainer(context: Context) {
     private val appContext = context.applicationContext
+    val application: Application = appContext as Application
 
     val database: AppDatabase = AppDatabase.create(appContext)
     val settingsRepository: SettingsRepository = SettingsRepository(appContext)

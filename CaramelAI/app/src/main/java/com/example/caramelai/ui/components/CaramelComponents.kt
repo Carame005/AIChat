@@ -42,6 +42,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -147,7 +148,7 @@ fun CaramelTopBar(
             IconButton(onClick = onBack) {
                 Icon(
                     Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Back",
+                    contentDescription = stringResource(R.string.cd_back),
                     tint = MaterialTheme.colorScheme.onSurface,
                 )
             }
@@ -454,14 +455,14 @@ fun CaramelBottomBar(
     ) {
         BottomTabItem(
             selected = selectedTab == MainTab.Chats,
-            label = "Chats",
+            label = stringResource(R.string.nav_chats),
             iconRes = R.drawable.ic_chat,
             onClick = { onSelect(MainTab.Chats) },
             accent = colors.accentStart,
         )
         BottomTabItem(
             selected = selectedTab == MainTab.Profile,
-            label = "Perfil",
+            label = stringResource(R.string.nav_profile),
             iconRes = R.drawable.ic_profile,
             onClick = { onSelect(MainTab.Profile) },
             accent = colors.accentStart,

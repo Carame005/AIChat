@@ -1,7 +1,9 @@
 package com.example.caramelai.ui.characters
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.caramelai.R
 import com.example.caramelai.data.db.CharacterEntity
 import com.example.caramelai.data.remote.ChatMessageDto
 import com.example.caramelai.data.remote.GenerationParams
@@ -47,11 +49,12 @@ data class CharacterEditorUiState(
 )
 
 class CharacterEditorViewModel(
+    application: Application,
     private val characterId: String,
     private val characterRepository: CharacterRepository,
     private val llmClient: LlmClient,
     private val settingsRepository: SettingsRepository,
-) : ViewModel() {
+) : AndroidViewModel(application) {
     private val _uiState = MutableStateFlow(CharacterEditorUiState(id = characterId))
     val uiState: StateFlow<CharacterEditorUiState> = _uiState.asStateFlow()
 
@@ -96,6 +99,7 @@ class CharacterEditorViewModel(
             val result = llmClient.complete(
                 baseUrl = settings.baseUrl,
                 apiKey = settings.apiKey,
+                model = settings.modelId,
                 messages = listOf(
                     ChatMessageDto(
                         role = "system",
@@ -130,7 +134,8 @@ class CharacterEditorViewModel(
                     _uiState.update {
                         it.copy(
                             generatingField = null,
-                            fieldError = err.message ?: "No se pudo generar",
+                            fieldError = err.message
+                                ?: getApplication<Application>().getString(R.string.editor_generate_failed),
                         )
                     }
                 }
@@ -141,7 +146,11 @@ class CharacterEditorViewModel(
         viewModelScope.launch {
             val state = _uiState.value
             if (state.name.isBlank()) {
-                _events.emit(EditorEvent.Error("El nombre es obligatorio"))
+                _events.emit(
+                    EditorEvent.Error(
+                        getApplication<Application>().getString(R.string.editor_name_required),
+                    ),
+                )
                 return@launch
             }
             characterRepository.save(state.toEntity())

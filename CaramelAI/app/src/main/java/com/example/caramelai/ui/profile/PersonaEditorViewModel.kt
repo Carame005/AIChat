@@ -1,7 +1,9 @@
 package com.example.caramelai.ui.profile
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.caramelai.R
 import com.example.caramelai.data.db.PersonaEntity
 import com.example.caramelai.data.settings.SettingsRepository
 import com.example.caramelai.domain.PersonaRepository
@@ -27,10 +29,11 @@ data class PersonaEditorUiState(
 )
 
 class PersonaEditorViewModel(
+    application: Application,
     private val personaId: String,
     private val personaRepository: PersonaRepository,
     private val settingsRepository: SettingsRepository,
-) : ViewModel() {
+) : AndroidViewModel(application) {
     private val _uiState = MutableStateFlow(PersonaEditorUiState(id = personaId))
     val uiState: StateFlow<PersonaEditorUiState> = _uiState.asStateFlow()
 
@@ -74,7 +77,11 @@ class PersonaEditorViewModel(
         viewModelScope.launch {
             val state = _uiState.value
             if (state.name.isBlank()) {
-                _events.emit(EditorEvent.Error("El nombre es obligatorio"))
+                _events.emit(
+                    EditorEvent.Error(
+                        getApplication<Application>().getString(R.string.editor_name_required),
+                    ),
+                )
                 return@launch
             }
             personaRepository.save(

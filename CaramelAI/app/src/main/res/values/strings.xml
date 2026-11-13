@@ -1,3 +1,147 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">CaramelAI</string>
+
+    <!-- Common -->
+    <string name="action_cancel">Cancel</string>
+    <string name="action_save">Save</string>
+    <string name="action_delete">Delete</string>
+    <string name="action_edit">Edit</string>
+    <string name="action_back">Back</string>
+    <string name="action_continue">Continue</string>
+    <string name="action_retry">Retry</string>
+    <string name="cd_back">Back</string>
+    <string name="cd_settings">Settings</string>
+    <string name="cd_avatar">Avatar</string>
+
+    <!-- Nav -->
+    <string name="nav_chats">Chats</string>
+    <string name="nav_profile">Profile</string>
+
+    <!-- Startup -->
+    <string name="startup_connecting">Connecting to the server…</string>
+    <string name="startup_failed_title">Could not connect</string>
+    <string name="startup_configure">Configure connection</string>
+    <string name="startup_continue_offline">Continue offline</string>
+
+    <!-- Character list -->
+    <string name="characters_empty">Create a character to start chatting</string>
+    <string name="cd_toggle_layout">Toggle layout</string>
+    <string name="cd_import">Import</string>
+    <string name="cd_new_character">New character</string>
+    <string name="characters_delete_title">Delete %1$s?</string>
+    <string name="characters_delete_body">The character and all of its chats will be removed.</string>
+    <string name="characters_imported">Imported %1$s</string>
+
+    <!-- Character editor -->
+    <string name="editor_step_identity">Identity</string>
+    <string name="editor_step_personality">Personality</string>
+    <string name="editor_step_dialogue">Dialogue</string>
+    <string name="editor_image">Image</string>
+    <string name="editor_upload_hint">Upload an image for your Chat AI</string>
+    <string name="editor_upload">Upload</string>
+    <string name="editor_name">Name</string>
+    <string name="editor_name_placeholder">Add a name for your Chat AI</string>
+    <string name="editor_description">Description</string>
+    <string name="editor_description_placeholder">Describe the character</string>
+    <string name="editor_personality">Personality</string>
+    <string name="editor_personality_placeholder">Traits, tone, style</string>
+    <string name="editor_scenario">Scenario</string>
+    <string name="editor_scenario_placeholder">Scene context</string>
+    <string name="editor_greeting">First message</string>
+    <string name="editor_greeting_placeholder">Opening message that starts conversations</string>
+    <string name="editor_example">Memory / example dialogue</string>
+    <string name="editor_example_placeholder">Background, traits, or other details to remember</string>
+    <string name="editor_system_prompt">System prompt (optional)</string>
+    <string name="editor_system_prompt_placeholder">Extra system instructions</string>
+    <string name="editor_export_json">Export JSON</string>
+    <string name="editor_generate">Generate</string>
+    <string name="editor_saved">Saved</string>
+    <string name="editor_json_copied">JSON copied to clipboard</string>
+    <string name="editor_name_required">Name is required</string>
+    <string name="editor_generate_failed">Could not generate</string>
+
+    <!-- Profile / persona -->
+    <string name="profile_title">Profile</string>
+    <string name="profile_personas">Personas</string>
+    <string name="profile_personas_hint">The bot uses the active persona to know who you are.</string>
+    <string name="profile_new_persona">New persona</string>
+    <string name="profile_theme">Theme</string>
+    <string name="profile_connection_generation">Connection &amp; generation</string>
+    <string name="profile_default_badge">Default</string>
+    <string name="cd_make_default">Make default</string>
+    <string name="persona_editor_title">Persona</string>
+    <string name="cd_change_photo">Change photo</string>
+    <string name="persona_name_placeholder">Your name</string>
+    <string name="persona_description_placeholder">Who you are, looks, personality…</string>
+    <string name="persona_chip_gender">+ Gender</string>
+    <string name="persona_chip_appearance">+ Appearance</string>
+    <string name="persona_chip_species">+ Species</string>
+    <string name="persona_chip_gender_prefix">Gender: </string>
+    <string name="persona_chip_appearance_prefix">Appearance: </string>
+    <string name="persona_chip_species_prefix">Species: </string>
+    <string name="persona_default_for_chats">Default for all chats</string>
+
+    <!-- Chat -->
+    <string name="chat_fallback_title">Chat</string>
+    <string name="cd_send">Send</string>
+    <string name="cd_continue">Continue</string>
+    <string name="chat_history_title">Chat history</string>
+    <string name="chat_pick_persona">Choose persona</string>
+    <string name="chat_pick_persona_empty">Create a persona in Profile to use it here.</string>
+    <string name="chat_edit_message">Edit message</string>
+    <string name="chat_no_description">No description</string>
+    <string name="chat_character_fallback">Character</string>
+    <string name="cd_export_specs">Export character card</string>
+    <string name="chat_save_for_import">Save for import</string>
+    <string name="chat_view_character">View character profile</string>
+    <string name="chat_history">Chat history</string>
+    <string name="chat_new_chat">Start new chat</string>
+    <string name="chat_specs_copied">Character card copied to clipboard</string>
+    <string name="chat_truncated_hint">Reply truncated by the token limit. Tap Continue to keep going.</string>
+    <string name="chat_branch_failed">Could not create branch</string>
+    <string name="chat_character_missing">Character not found</string>
+    <string name="chat_with_name">Chat with %1$s</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_connection">Connection</string>
+    <string name="settings_base_url">Base URL</string>
+    <string name="settings_base_url_hint">PC Wi‑Fi IP + llama-server port</string>
+    <string name="settings_api_key">API key</string>
+    <string name="settings_fallback_name">Fallback name ({{user}})</string>
+    <string name="settings_fallback_name_placeholder">If no active persona</string>
+    <string name="settings_test_connection">Test connection</string>
+    <string name="settings_connected">Connected: %1$s</string>
+    <string name="settings_language">Language</string>
+    <string name="settings_language_en">English</string>
+    <string name="settings_language_es">Spanish</string>
+    <string name="settings_model">Model</string>
+    <string name="settings_model_hint">The server loads the GGUF you request for each chat. Only files present on the PC (models\\) show as available.</string>
+    <string name="settings_model_available">Available on server</string>
+    <string name="settings_model_unavailable">Not on server</string>
+    <string name="settings_refresh_models">Refresh list</string>
+    <string name="settings_model_q4_name">Chaos Unknown 12B · Q4</string>
+    <string name="settings_model_q4_desc">Lighter; better for laptops / limited VRAM.</string>
+    <string name="settings_model_q5_name">Chaos Unknown 12B · Q5</string>
+    <string name="settings_model_q5_desc">Higher quality; aimed at desktops (e.g. 3060 12 GB).</string>
+    <string name="settings_global_behavior">Global behavior</string>
+    <string name="settings_global_behavior_hint">Instructions applied to every chat. Use this for overall tone (romantic, NSFW, SFW, shorter replies, etc.).</string>
+    <string name="settings_global_behavior_placeholder">e.g. Lean romantic and allow NSFW if the user starts it. Keep the character consistent.</string>
+    <string name="settings_generation">Generation</string>
+    <string name="settings_temperature">Temperature</string>
+    <string name="settings_temperature_desc">Creativity. Higher = more creative/unpredictable; lower = more coherent and repetitive.</string>
+    <string name="settings_top_p">Top P</string>
+    <string name="settings_top_p_desc">Nucleus sampling. Higher allows more word variety; lower sticks to likely options.</string>
+    <string name="settings_top_k">Top K</string>
+    <string name="settings_top_k_desc">Limit sampling to the K most likely tokens. 0 or high = more diversity; low = more predictable.</string>
+    <string name="settings_min_p">Min P</string>
+    <string name="settings_min_p_desc">Relative minimum threshold. Filters unlikely tokens. Higher = safer, less weird replies.</string>
+    <string name="settings_repeat_penalty">Repeat penalty</string>
+    <string name="settings_repeat_penalty_desc">Penalizes repetition. Higher = fewer loops; too high can sound forced.</string>
+    <string name="settings_max_tokens">Max tokens (per reply)</string>
+    <string name="settings_max_tokens_desc">Cap on tokens the bot can generate in ONE message. Not full chat size. Raise for longer replies (up to 4096). In server logs this is n_gen / eval tokens, not n_tokens.</string>
+    <string name="settings_context_size">Context size (chat memory)</string>
+    <string name="settings_context_size_desc">Total tokens for prompt + history + reply that fit in the slot. Must match llama-server -c. In logs this is n_tokens. Higher = more history, more VRAM.</string>
+    <string name="settings_reset_generation">Reset generation defaults</string>
 </resources>

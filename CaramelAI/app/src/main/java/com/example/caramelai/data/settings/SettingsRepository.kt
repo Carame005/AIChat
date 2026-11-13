@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.example.caramelai.data.remote.LlmModels
 import com.example.caramelai.ui.theme.AppTheme
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -24,6 +25,10 @@ enum class BotListLayout {
 data class AppSettings(
     val baseUrl: String = "http://192.168.68.71:8081",
     val apiKey: String = "caramel-local-key",
+    /** GGUF id sent as OpenAI `model` (must exist under llama-server --models-dir). */
+    val modelId: String = LlmModels.defaultId,
+    /** App UI language; English is the default. */
+    val language: AppLanguage = AppLanguage.English,
     val userName: String = "User",
     val temperature: Float = 0.8f,
     val topP: Float = 0.9f,
@@ -54,6 +59,8 @@ class SettingsRepository(context: Context) {
             val next = transform(prefs.toSettings())
             prefs[Keys.BASE_URL] = next.baseUrl
             prefs[Keys.API_KEY] = next.apiKey
+            prefs[Keys.MODEL_ID] = next.modelId
+            prefs[Keys.LANGUAGE] = next.language.tag
             prefs[Keys.USER_NAME] = next.userName
             prefs[Keys.TEMPERATURE] = next.temperature
             prefs[Keys.TOP_P] = next.topP
@@ -78,6 +85,8 @@ class SettingsRepository(context: Context) {
         return AppSettings(
             baseUrl = this[Keys.BASE_URL] ?: defaults.baseUrl,
             apiKey = this[Keys.API_KEY] ?: defaults.apiKey,
+            modelId = this[Keys.MODEL_ID] ?: defaults.modelId,
+            language = AppLanguage.fromTag(this[Keys.LANGUAGE] ?: defaults.language.tag),
             userName = this[Keys.USER_NAME] ?: defaults.userName,
             temperature = this[Keys.TEMPERATURE] ?: defaults.temperature,
             topP = this[Keys.TOP_P] ?: defaults.topP,
@@ -100,6 +109,8 @@ class SettingsRepository(context: Context) {
     private object Keys {
         val BASE_URL = stringPreferencesKey("base_url")
         val API_KEY = stringPreferencesKey("api_key")
+        val MODEL_ID = stringPreferencesKey("model_id")
+        val LANGUAGE = stringPreferencesKey("language")
         val USER_NAME = stringPreferencesKey("user_name")
         val TEMPERATURE = floatPreferencesKey("temperature")
         val TOP_P = floatPreferencesKey("top_p")
