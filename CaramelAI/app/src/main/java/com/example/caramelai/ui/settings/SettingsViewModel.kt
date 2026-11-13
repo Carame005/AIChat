@@ -105,6 +105,7 @@ class SettingsViewModel(
     fun setLanguage(language: AppLanguage) {
         viewModelScope.launch {
             settingsRepository.update { it.copy(language = language) }
+            // AppCompat recreates the Activity once with the new locale.
             AppLanguage.apply(language)
         }
     }

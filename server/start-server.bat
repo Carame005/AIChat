@@ -4,12 +4,12 @@ REM Model card: https://huggingface.co/Vortex5/Chaos-Unknown-12b
 REM GGUF:       https://huggingface.co/mradermacher/Chaos-Unknown-12b-GGUF
 REM
 REM Prerequisites:
-REM   1. Run download-model.bat and/or download-model-q5.bat
+REM   1. Run download-model.bat and download-model-q5.bat as needed
 REM   2. Put a CUDA Windows llama.cpp build in this folder, with MATCHING cudart zip:
 REM      https://github.com/ggml-org/llama.cpp/releases
-REM      Driver CUDA 12.x (nvidia-smi) -> win-cuda-12.4 + cudart-...-cuda-12.4
-REM      Driver CUDA 13.x              -> win-cuda-13.5 + cudart-...-cuda-13.5
-REM      Mixing 13 binaries with 12 DLLs (or a driver that only supports 12) = CPU-only.
+REM      Driver CUDA 12.x - nvidia-smi - use win-cuda-12.4 + matching cudart
+REM      Driver CUDA 13.x - use win-cuda-13.5 + matching cudart
+REM      Mixing CUDA 13 binaries with a CUDA 12-only driver = CPU-only.
 REM   3. Allow inbound TCP 8081 on the Private firewall profile only
 
 setlocal EnableExtensions
@@ -55,7 +55,7 @@ if exist "%MODEL_Q5%" set "HAS_MODEL=1"
 if not defined HAS_MODEL (
     echo ERROR: No Chaos-Unknown GGUF found in:
     echo   %MODELS_DIR%
-    echo Run download-model.bat (Q4) and/or download-model-q5.bat (Q5).
+    echo Run download-model.bat for Q4, or download-model-q5.bat for Q5.
     pause
     exit /b 1
 )
@@ -88,13 +88,16 @@ echo ---- nvidia-smi ---- >> "%DIAG_FILE%"
 nvidia-smi >> "%DIAG_FILE%" 2>&1
 echo. >> "%DIAG_FILE%"
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0diagnose-cuda.ps1" -ServerDir "%~dp0." -DiagFile "%DIAG_FILE%"
-if errorlevel 1 (
-    echo.
-    echo WARNING: CUDA preflight reported a problem. See:
-    echo   %DIAG_FILE%
-    echo Server will still start, but may fall back to CPU.
-    echo.
+REM Lightweight preflight (skip with SKIP_CUDA_DIAG=1 if PowerShell is blocked)
+if not defined SKIP_CUDA_DIAG (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0diagnose-cuda.ps1" -ServerDir "%~dp0." -DiagFile "%DIAG_FILE%"
+    if errorlevel 1 (
+        echo.
+        echo WARNING: CUDA preflight reported a problem. See:
+        echo   %DIAG_FILE%
+        echo Server will still start, but may fall back to CPU.
+        echo.
+    )
 )
 
 echo Starting llama-server ROUTER on http://%HOST%:%PORT%
@@ -104,22 +107,29 @@ if exist "%MODEL_Q5%" echo   - Chaos-Unknown-12b.Q5_K_M.gguf
 echo Context: %CTX%  GPU layers: %NGL%  parallel: %NP%  fit-target: %FIT_TARGET% MiB  models-max: %MODELS_MAX%
 echo API key: %API_KEY%
 echo Chat template: Mistral Instruct via --jinja
-echo Logging to: %LOG_FILE%  (verbosity %LOG_VERBOSITY%)
+echo Logging to: %LOG_FILE%  verbosity %LOG_VERBOSITY%
 echo Preflight: %DIAG_FILE%
 echo.
-echo The app picks the model via the OpenAI "model" field /v1/chat/completions
-echo Tip: while running, check VRAM with: nvidia-smi
+echo Models load on first chat request from the app - no autoload.
+echo Tip: while running, check VRAM with nvidia-smi
 echo.
 
 if exist "%LOG_FILE%" (
     for /f %%i in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss"') do set "STAMP=%%i"
-    move /y "%LOG_FILE%" "%LOG_DIR%\llama-server-%STAMP%.log" >nul
+    move /y "%LOG_FILE%" "%LOG_DIR%\llama-server-%STAMP%.log" >nul 2>nul
 )
 
-REM No -m: router mode. Instances inherit -ngl/-c/-np/-fit from here.
+REM Free the port if a previous instance is stuck
+for /f "tokens=5" %%p in ('netstat -ano ^| findstr /R /C:":%PORT% .*LISTENING"') do (
+    echo Port %PORT% in use by PID %%p - stopping it...
+    taskkill /F /PID %%p >nul 2>&1
+)
+
+REM No -m: router mode. --no-models-autoload = wait for app "model" field (avoids startup OOM).
 "%LLAMA_SERVER%" ^
   --models-dir "%MODELS_DIR%" ^
   --models-max %MODELS_MAX% ^
+  --no-models-autoload ^
   --host %HOST% ^
   --port %PORT% ^
   -ngl %NGL% ^
@@ -134,8 +144,15 @@ REM No -m: router mode. Instances inherit -ngl/-c/-np/-fit from here.
   --log-prefix ^
   --log-timestamps
 
+set "EXITCODE=%ERRORLEVEL%"
 echo.
-echo llama-server exited with code %ERRORLEVEL%
+echo llama-server exited with code %EXITCODE%
 echo Last log: %LOG_FILE%
+if exist "%LOG_FILE%" (
+    echo ---- last log lines ----
+    powershell -NoProfile -Command "Get-Content -LiteralPath '%LOG_FILE%' -Tail 40 -ErrorAction SilentlyContinue"
+)
+echo.
 pause
+exit /b %EXITCODE%
 endlocal
