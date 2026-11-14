@@ -42,6 +42,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Stop
@@ -356,6 +357,10 @@ fun ChatScreen(
                     showCharacterMenu = false
                     onEditCharacter()
                 },
+                onMemory = {
+                    showCharacterMenu = false
+                    viewModel.beginMemoryEdit()
+                },
                 onHistory = {
                     showCharacterMenu = false
                     showHistory = true
@@ -571,6 +576,53 @@ fun ChatScreen(
             },
         )
     }
+
+    if (uiState.showMemoryDialog) {
+        AlertDialog(
+            onDismissRequest = viewModel::cancelMemoryEdit,
+            title = { Text(stringResource(R.string.chat_memory_title)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        text = stringResource(R.string.chat_memory_summary_label),
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                    OutlinedTextField(
+                        value = uiState.memorySummaryDraft,
+                        onValueChange = viewModel::updateMemorySummaryDraft,
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 3,
+                        placeholder = {
+                            Text(stringResource(R.string.chat_memory_summary_hint))
+                        },
+                    )
+                    Text(
+                        text = stringResource(R.string.chat_memory_pinned_label),
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                    OutlinedTextField(
+                        value = uiState.memoryPinnedDraft,
+                        onValueChange = viewModel::updateMemoryPinnedDraft,
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 3,
+                        placeholder = {
+                            Text(stringResource(R.string.chat_memory_pinned_hint))
+                        },
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = viewModel::commitMemoryEdit) {
+                    Text(stringResource(R.string.action_save))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::cancelMemoryEdit) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            },
+        )
+    }
 }
 
 @Composable
@@ -579,6 +631,7 @@ private fun CharacterMenuSheet(
     onClose: () -> Unit,
     onExport: () -> Unit,
     onViewProfile: () -> Unit,
+    onMemory: () -> Unit,
     onHistory: () -> Unit,
     onNewChat: () -> Unit,
 ) {
@@ -651,6 +704,12 @@ private fun CharacterMenuSheet(
             icon = Icons.Default.Person,
             label = stringResource(R.string.chat_view_character),
             onClick = onViewProfile,
+        )
+        Spacer(Modifier.height(10.dp))
+        CharacterMenuItem(
+            icon = Icons.Default.Memory,
+            label = stringResource(R.string.chat_memory),
+            onClick = onMemory,
         )
         Spacer(Modifier.height(10.dp))
         CharacterMenuItem(

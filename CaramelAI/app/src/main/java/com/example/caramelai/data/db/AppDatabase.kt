@@ -14,7 +14,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ConversationEntity::class,
         MessageEntity::class,
     ],
-    version = 3,
+    version = 5,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -55,13 +55,37 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE conversations ADD COLUMN summary TEXT NOT NULL DEFAULT ''",
+                )
+                db.execSQL(
+                    "ALTER TABLE conversations ADD COLUMN summaryUpToMessageId TEXT",
+                )
+                db.execSQL(
+                    "ALTER TABLE conversations ADD COLUMN pinnedMemory TEXT NOT NULL DEFAULT ''",
+                )
+            }
+        }
+
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("DROP INDEX IF EXISTS index_messages_conversationId")
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_messages_conversationId_createdAt " +
+                        "ON messages(conversationId, createdAt)",
+                )
+            }
+        }
+
         fun create(context: Context): AppDatabase =
             Room.databaseBuilder(
                 context.applicationContext,
                 AppDatabase::class.java,
                 "caramel_ai.db",
             )
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 .build()
     }
 }

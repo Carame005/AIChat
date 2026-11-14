@@ -199,6 +199,13 @@ class SettingsViewModel(
                     topK = defaults.topK,
                     minP = defaults.minP,
                     repeatPenalty = defaults.repeatPenalty,
+                    dryMultiplier = defaults.dryMultiplier,
+                    dryBase = defaults.dryBase,
+                    dryAllowedLength = defaults.dryAllowedLength,
+                    dryPenaltyLastN = defaults.dryPenaltyLastN,
+                    xtcProbability = defaults.xtcProbability,
+                    xtcThreshold = defaults.xtcThreshold,
+                    repeatLastN = defaults.repeatLastN,
                     maxTokens = defaults.maxTokens,
                     contextSize = defaults.contextSize,
                 )

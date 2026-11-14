@@ -110,6 +110,12 @@
     <string name="chat_revise_prompt_title">Edit with prompt</string>
     <string name="chat_revise_prompt_hint">e.g. Make this reply more suggestive, or mention what happened earlier…</string>
     <string name="chat_revise_prompt_apply">Rewrite</string>
+    <string name="chat_memory">Memory</string>
+    <string name="chat_memory_title">Chat memory</string>
+    <string name="chat_memory_summary_label">Story so far</string>
+    <string name="chat_memory_summary_hint">Auto-updated summary of older events. Edit if needed.</string>
+    <string name="chat_memory_pinned_label">Key facts</string>
+    <string name="chat_memory_pinned_hint">Facts the bot should always remember (names, places, promises…).</string>
 
     <!-- Settings -->
     <string name="settings_title">Settings</string>
@@ -147,6 +153,12 @@
     <string name="settings_min_p_desc">Relative minimum threshold. Filters unlikely tokens. Higher = safer, less weird replies.</string>
     <string name="settings_repeat_penalty">Repeat penalty</string>
     <string name="settings_repeat_penalty_desc">Penalizes repetition. Higher = fewer loops; too high can sound forced.</string>
+    <string name="settings_dry_multiplier">DRY multiplier</string>
+    <string name="settings_dry_multiplier_desc">Penalizes repeating sequences already in context. Higher = more variety across turns. 0 disables DRY.</string>
+    <string name="settings_xtc_probability">XTC probability</string>
+    <string name="settings_xtc_probability_desc">Chance to drop the most obvious next token so openings vary. Higher = more surprise.</string>
+    <string name="settings_xtc_threshold">XTC threshold</string>
+    <string name="settings_xtc_threshold_desc">How confident a token must be before XTC can drop it. Lower = more aggressive.</string>
     <string name="settings_max_tokens">Max tokens (per reply)</string>
     <string name="settings_max_tokens_desc">Cap on tokens the bot can generate in ONE message. Not full chat size. Raise for longer replies (up to 4096). In server logs this is n_gen / eval tokens, not n_tokens.</string>
     <string name="settings_context_size">Context size (chat memory)</string>

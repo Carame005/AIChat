@@ -62,6 +62,7 @@ class AppViewModelFactory(
                     characterRepository = container.characterRepository,
                     personaRepository = container.personaRepository,
                     settingsRepository = container.settingsRepository,
+                    summaryCoordinator = container.summaryCoordinator,
                 ) as T
 
             modelClass.isAssignableFrom(SettingsViewModel::class.java) ->

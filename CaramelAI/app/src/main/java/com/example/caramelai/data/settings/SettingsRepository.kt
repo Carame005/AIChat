@@ -23,25 +23,40 @@ enum class BotListLayout {
 }
 
 data class AppSettings(
-    val baseUrl: String = "http://192.168.68.71:8081",
+    val baseUrl: String = "",
     val apiKey: String = "caramel-local-key",
     /** GGUF id sent as OpenAI `model` (must exist under llama-server --models-dir). */
     val modelId: String = LlmModels.defaultId,
     /** App UI language; English is the default. */
     val language: AppLanguage = AppLanguage.English,
     val userName: String = "User",
-    val temperature: Float = 0.8f,
-    val topP: Float = 0.9f,
-    val topK: Int = 40,
-    val minP: Float = 0.05f,
-    val repeatPenalty: Float = 1.1f,
+    val temperature: Float = 1.0f,
+    val topP: Float = 1.0f,
+    val topK: Int = 0,
+    val minP: Float = 0.08f,
+    val repeatPenalty: Float = 1.02f,
+    val dryMultiplier: Float = 0.8f,
+    val dryBase: Float = 1.75f,
+    val dryAllowedLength: Int = 2,
+    val dryPenaltyLastN: Int = -1,
+    val xtcProbability: Float = 0.5f,
+    val xtcThreshold: Float = 0.1f,
+    val repeatLastN: Int = 64,
     val maxTokens: Int = 512,
     val contextSize: Int = 8192,
+    /** Last known server context size from GET /props; null if unknown. */
+    val serverContextSize: Int? = null,
     val globalBehavior: String = "",
     val theme: AppTheme = AppTheme.Dark,
     val botListLayout: BotListLayout = BotListLayout.GRID,
     val defaultPersonaId: String? = null,
 ) {
+    /** Effective context used for prompt budgeting. */
+    fun effectiveContextSize(): Int {
+        val server = serverContextSize
+        return if (server != null && server > 0) minOf(contextSize, server) else contextSize
+    }
+
     companion object {
         fun defaults() = AppSettings()
     }
@@ -67,8 +82,20 @@ class SettingsRepository(context: Context) {
             prefs[Keys.TOP_K] = next.topK
             prefs[Keys.MIN_P] = next.minP
             prefs[Keys.REPEAT_PENALTY] = next.repeatPenalty
+            prefs[Keys.DRY_MULTIPLIER] = next.dryMultiplier
+            prefs[Keys.DRY_BASE] = next.dryBase
+            prefs[Keys.DRY_ALLOWED_LENGTH] = next.dryAllowedLength
+            prefs[Keys.DRY_PENALTY_LAST_N] = next.dryPenaltyLastN
+            prefs[Keys.XTC_PROBABILITY] = next.xtcProbability
+            prefs[Keys.XTC_THRESHOLD] = next.xtcThreshold
+            prefs[Keys.REPEAT_LAST_N] = next.repeatLastN
             prefs[Keys.MAX_TOKENS] = next.maxTokens
             prefs[Keys.CONTEXT_SIZE] = next.contextSize
+            if (next.serverContextSize == null) {
+                prefs.remove(Keys.SERVER_CONTEXT_SIZE)
+            } else {
+                prefs[Keys.SERVER_CONTEXT_SIZE] = next.serverContextSize
+            }
             prefs[Keys.GLOBAL_BEHAVIOR] = next.globalBehavior
             prefs[Keys.THEME] = next.theme.name
             prefs[Keys.BOT_LIST_LAYOUT] = next.botListLayout.name
@@ -93,8 +120,16 @@ class SettingsRepository(context: Context) {
             topK = this[Keys.TOP_K] ?: defaults.topK,
             minP = this[Keys.MIN_P] ?: defaults.minP,
             repeatPenalty = this[Keys.REPEAT_PENALTY] ?: defaults.repeatPenalty,
+            dryMultiplier = this[Keys.DRY_MULTIPLIER] ?: defaults.dryMultiplier,
+            dryBase = this[Keys.DRY_BASE] ?: defaults.dryBase,
+            dryAllowedLength = this[Keys.DRY_ALLOWED_LENGTH] ?: defaults.dryAllowedLength,
+            dryPenaltyLastN = this[Keys.DRY_PENALTY_LAST_N] ?: defaults.dryPenaltyLastN,
+            xtcProbability = this[Keys.XTC_PROBABILITY] ?: defaults.xtcProbability,
+            xtcThreshold = this[Keys.XTC_THRESHOLD] ?: defaults.xtcThreshold,
+            repeatLastN = this[Keys.REPEAT_LAST_N] ?: defaults.repeatLastN,
             maxTokens = this[Keys.MAX_TOKENS] ?: defaults.maxTokens,
             contextSize = this[Keys.CONTEXT_SIZE] ?: defaults.contextSize,
+            serverContextSize = this[Keys.SERVER_CONTEXT_SIZE],
             globalBehavior = this[Keys.GLOBAL_BEHAVIOR] ?: defaults.globalBehavior,
             theme = this[Keys.THEME]?.let {
                 runCatching { AppTheme.valueOf(it) }.getOrDefault(AppTheme.Dark)
@@ -117,8 +152,16 @@ class SettingsRepository(context: Context) {
         val TOP_K = intPreferencesKey("top_k")
         val MIN_P = floatPreferencesKey("min_p")
         val REPEAT_PENALTY = floatPreferencesKey("repeat_penalty")
+        val DRY_MULTIPLIER = floatPreferencesKey("dry_multiplier")
+        val DRY_BASE = floatPreferencesKey("dry_base")
+        val DRY_ALLOWED_LENGTH = intPreferencesKey("dry_allowed_length")
+        val DRY_PENALTY_LAST_N = intPreferencesKey("dry_penalty_last_n")
+        val XTC_PROBABILITY = floatPreferencesKey("xtc_probability")
+        val XTC_THRESHOLD = floatPreferencesKey("xtc_threshold")
+        val REPEAT_LAST_N = intPreferencesKey("repeat_last_n")
         val MAX_TOKENS = intPreferencesKey("max_tokens")
         val CONTEXT_SIZE = intPreferencesKey("context_size")
+        val SERVER_CONTEXT_SIZE = intPreferencesKey("server_context_size")
         val GLOBAL_BEHAVIOR = stringPreferencesKey("global_behavior")
         val THEME = stringPreferencesKey("theme")
         val BOT_LIST_LAYOUT = stringPreferencesKey("bot_list_layout")

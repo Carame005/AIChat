@@ -33,7 +33,7 @@ Clone on another PC, download the model + server binaries, build the app, and se
 
 ## Minimum specs (Q4 / Q5)
 
-Both quants are **Chaos Unknown 12B** ([mradermacher GGUF](https://huggingface.co/mradermacher/Chaos-Unknown-12b-GGUF)). Context in this project defaults to **8192** tokens.
+Both quants are **Chaos Unknown 12B** ([mradermacher GGUF](https://huggingface.co/mradermacher/Chaos-Unknown-12b-GGUF)). App prompt budget defaults to **8192** tokens; the server runs **-c 12288** with **-np 2** (chat + summary slots, shared KV).
 
 | | **Q4_K_M** | **Q5_K_M** |
 |---|---|---|
@@ -48,8 +48,8 @@ Both quants are **Chaos Unknown 12B** ([mradermacher GGUF](https://huggingface.c
 
 Notes:
 
-- Figures assume **one chat at a time**, context **8192**, and CUDA working (matching llama.cpp CUDA build + driver).
-- Q5 needs more VRAM/RAM than Q4 for the same context; if it barely fits, lower context in the app **and** server `-c`, or stick to Q4.
+- Figures assume **one chat at a time**, app context **8192**, server `-c 12288` / `-np 2` (~0.6–1 GB extra VRAM vs 8192/np1 on Q4), and CUDA working.
+- Q5 needs more VRAM/RAM than Q4 for the same context; if it barely fits, lower context in the app **and** server `-c`/`-np`, or stick to Q4.
 - The app picks Q4/Q5 in Settings; `start-server.bat` runs in **router mode** and loads the requested GGUF.
 
 ---
@@ -112,7 +112,7 @@ curl http://127.0.0.1:8081/health
 ```
 
 Default API key: `caramel-local-key`  
-Server context (`-c`): **8192** (must match the app).
+Server context (`-c`): **12288** with `-np 2 --kv-unified` (app prompt budget still **8192**).
 
 More detail: [`server/README.md`](server/README.md).
 
@@ -134,7 +134,7 @@ App UI language defaults to **English**; switch to Spanish in Settings if you wa
 | Base URL | `http://<PC-LAN-IP>:8081` |
 | API key | `caramel-local-key` |
 | Model | Q4 or Q5 (must exist under `server\models\`) |
-| Context size | `8192` (same as server `-c`) |
+| Context size | `8192` (app budget; server `-c` is 12288) |
 | Max tokens | Your choice (e.g. 512) |
 
 **PC IP on Windows:**

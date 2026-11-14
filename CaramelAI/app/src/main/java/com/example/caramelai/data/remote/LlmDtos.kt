@@ -19,7 +19,28 @@ data class ChatCompletionRequest(
     @SerialName("top_k") val topK: Int? = null,
     @SerialName("min_p") val minP: Double? = null,
     @SerialName("repeat_penalty") val repeatPenalty: Double? = null,
+    @SerialName("repeat_last_n") val repeatLastN: Int? = null,
+    @SerialName("dry_multiplier") val dryMultiplier: Double? = null,
+    @SerialName("dry_base") val dryBase: Double? = null,
+    @SerialName("dry_allowed_length") val dryAllowedLength: Int? = null,
+    @SerialName("dry_penalty_last_n") val dryPenaltyLastN: Int? = null,
+    @SerialName("xtc_probability") val xtcProbability: Double? = null,
+    @SerialName("xtc_threshold") val xtcThreshold: Double? = null,
+    @SerialName("cache_prompt") val cachePrompt: Boolean? = true,
     @SerialName("max_tokens") val maxTokens: Int? = null,
+    /** Prefer a specific llama-server parallel slot (chat vs summary). */
+    @SerialName("id_slot") val idSlot: Int? = null,
+)
+
+@Serializable
+data class ServerPropsResponse(
+    @SerialName("default_generation_settings")
+    val defaultGenerationSettings: DefaultGenerationSettings? = null,
+)
+
+@Serializable
+data class DefaultGenerationSettings(
+    @SerialName("n_ctx") val nCtx: Int? = null,
 )
 
 @Serializable

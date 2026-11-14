@@ -4,8 +4,13 @@ import com.example.caramelai.data.db.CharacterEntity
 import com.example.caramelai.data.db.MessageEntity
 import com.example.caramelai.data.db.MessageRole
 import com.example.caramelai.data.db.PersonaEntity
+import com.example.caramelai.data.remote.ChatCompletionRequest
 import com.example.caramelai.data.remote.ChatMessageDto
+import com.example.caramelai.data.remote.GenerationParams
+import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -52,6 +57,88 @@ class PromptBuilderTest {
     }
 
     @Test
+    fun systemPromptDoesNotEmbedContinueInstructions() {
+        val character = CharacterEntity(id = "1", name = "Ganyu", scenario = "A quiet café.")
+        val system = builder.buildSystemPrompt(
+            character = character,
+            persona = null,
+            userName = "Carlos",
+        )
+        assertFalse(system.contains("CONTINUE your previous"))
+    }
+
+    @Test
+    fun includesSummaryAndPinnedMemory() {
+        val character = CharacterEntity(id = "1", name = "Ganyu")
+        val system = builder.buildSystemPrompt(
+            character = character,
+            persona = null,
+            userName = "Carlos",
+            summary = "They met at the harbour.",
+            pinnedMemory = "Ganyu has a blue hairpin.",
+        )
+        assertTrue(system.contains("Story so far:"))
+        assertTrue(system.contains("They met at the harbour."))
+        assertTrue(system.contains("Key facts"))
+        assertTrue(system.contains("Ganyu has a blue hairpin."))
+    }
+
+    @Test
+    fun omitsExampleDialogueAfterEnoughHistory() {
+        val character = CharacterEntity(
+            id = "1",
+            name = "Ganyu",
+            exampleDialogue = "Ganyu: Hello example.",
+        )
+        val shortHistory = listOf(
+            MessageEntity("1", "c", MessageRole.USER, "Hi"),
+        )
+        val longHistory = (1..8).map { index ->
+            MessageEntity(
+                id = "$index",
+                conversationId = "c",
+                role = if (index % 2 == 0) MessageRole.ASSISTANT else MessageRole.USER,
+                content = "Turn $index",
+            )
+        }
+        val early = builder.build(
+            character = character,
+            history = shortHistory,
+            persona = null,
+            fallbackUserName = "Carlos",
+            contextSize = 8192,
+            maxTokens = 512,
+        )
+        val later = builder.build(
+            character = character,
+            history = longHistory,
+            persona = null,
+            fallbackUserName = "Carlos",
+            contextSize = 8192,
+            maxTokens = 512,
+        )
+        assertTrue(early.first().content.contains("Hello example."))
+        assertFalse(later.first().content.contains("Hello example."))
+    }
+
+    @Test
+    fun styleNoteOmitsOpeningsUnlessStrengthen() {
+        val replies = listOf(
+            "*She smiles softly* \"Hi.\"",
+            "*He leans closer* \"Hello.\"",
+        )
+        val normal = builder.buildStyleNote(replies, strengthen = false)
+        assertTrue(normal.contains("Vary sentence structure"))
+        assertFalse(normal.contains("*She smiles softly*"))
+        assertFalse(normal.contains("*He leans closer*"))
+
+        val strong = builder.buildStyleNote(replies, strengthen = true)
+        assertTrue(strong.contains("too similar"))
+        assertTrue(strong.contains("*She smiles softly* \"Hi.\""))
+        assertTrue(strong.contains("*He leans closer* \"Hello.\""))
+    }
+
+    @Test
     fun trimsOldestMessagesToFitBudget() {
         val character = CharacterEntity(id = "1", name = "Ganyu")
         val history = (1..40).map { index ->
@@ -73,6 +160,43 @@ class PromptBuilderTest {
         assertEquals(MessageRole.SYSTEM, messages.first().role)
         assertTrue(messages.size < history.size + 1)
         assertTrue(messages.any { it.content.contains("Message number 40") })
+    }
+
+    @Test
+    fun blockTrimSetsStableCutPoint() {
+        val character = CharacterEntity(id = "1", name = "Ganyu")
+        val history = (1..30).map { index ->
+            MessageEntity(
+                id = "m$index",
+                conversationId = "c",
+                role = if (index % 2 == 0) MessageRole.ASSISTANT else MessageRole.USER,
+                content = "Message number $index with enough padding for token estimates here.",
+            )
+        }
+        val first = builder.buildDetailed(
+            character = character,
+            history = history,
+            persona = null,
+            fallbackUserName = "Carlos",
+            contextSize = 700,
+            maxTokens = 128,
+        )
+        assertNotNull(first.newSummaryUpToMessageId)
+        assertTrue(first.droppedForSummary.isNotEmpty())
+
+        val second = builder.buildDetailed(
+            character = character,
+            history = history,
+            persona = null,
+            fallbackUserName = "Carlos",
+            contextSize = 700,
+            maxTokens = 128,
+            summaryUpToMessageId = first.newSummaryUpToMessageId,
+            summary = "Earlier events happened.",
+        )
+        // Same cut: no further trim while history after cut still fits soft budget.
+        assertEquals(null, second.newSummaryUpToMessageId)
+        assertTrue(second.messages.first().content.contains("Earlier events happened."))
     }
 
     @Test
@@ -105,7 +229,7 @@ class PromptBuilderTest {
         )
         assertEquals("(Begin the scene.)", messages[1].content)
         assertEquals("Ganyu: Hello there.", messages[2].content)
-        assertEquals("Carlos: Hi!", messages[3].content)
+        assertTrue(messages[3].content.startsWith("Carlos: Hi!"))
     }
 
     @Test
@@ -172,7 +296,7 @@ class PromptBuilderTest {
         assertTrue(messages.last().content.contains("NOT a new answer"))
         assertTrue(messages.last().content.contains("Hello there, friend."))
         assertTrue(messages.last().content.startsWith("Carlos:"))
-        assertTrue(messages.first().content.contains("CONTINUE your previous"))
+        assertFalse(messages.first().content.contains("CONTINUE your previous"))
     }
 
     @Test
@@ -209,7 +333,7 @@ class PromptBuilderTest {
             continueMode = true,
         )
         assertEquals(MessageRole.USER, messages.last().role)
-        assertEquals("Carlos: Hi", messages.last().content)
+        assertTrue(messages.last().content.contains("Carlos: Hi"))
     }
 
     @Test
@@ -270,7 +394,7 @@ class PromptBuilderTest {
         assertEquals(MessageRole.USER, messages.last().role)
         assertTrue(messages.last().content.contains("Regenerate your last reply"))
         assertTrue(messages.last().content.contains(rejected))
-        assertTrue(messages.last().content.contains("Do NOT repeat"))
+        assertTrue(messages.last().content.contains("Avoid echoing"))
     }
 
     @Test
@@ -294,7 +418,71 @@ class PromptBuilderTest {
         assertTrue(messages.last().content.contains("Rewrite your last reply"))
         assertTrue(messages.last().content.contains("Make this reply more suggestive"))
         assertTrue(messages.last().content.contains(previous))
-        assertTrue(messages.last().content.contains("Previous versions"))
+        assertTrue(messages.last().content.contains("Previous version"))
         assertTrue(!messages.last().content.contains("Regenerate your last reply"))
+    }
+
+    @Test
+    fun generationParamsMapDryAndXtcFields() {
+        val params = GenerationParams(
+            temperature = 1.0f,
+            topP = 1.0f,
+            topK = 0,
+            minP = 0.08f,
+            repeatPenalty = 1.02f,
+            maxTokens = 512,
+            dryMultiplier = 0.8f,
+            dryBase = 1.75f,
+            dryAllowedLength = 2,
+            dryPenaltyLastN = -1,
+            xtcProbability = 0.5f,
+            xtcThreshold = 0.1f,
+            idSlot = 0,
+        )
+        val request = params.toRequest(
+            model = "test-model",
+            messages = listOf(ChatMessageDto(MessageRole.USER, "Hi")),
+            stream = true,
+        )
+        assertEquals(0.8, request.dryMultiplier!!, 0.001)
+        assertEquals(0.5, request.xtcProbability!!, 0.001)
+        assertEquals(true, request.cachePrompt)
+        assertEquals(null, request.dryPenaltyLastN)
+        assertEquals(0, request.idSlot)
+        val json = Json {
+            encodeDefaults = true
+            explicitNulls = false
+        }.encodeToString(
+            ChatCompletionRequest.serializer(),
+            request,
+        )
+        assertTrue(json.contains("\"dry_multiplier\""))
+        assertTrue(json.contains("\"xtc_probability\""))
+        assertTrue(json.contains("\"cache_prompt\""))
+        assertTrue(json.contains("\"id_slot\":0"))
+        assertFalse(json.contains("\"dry_penalty_last_n\""))
+    }
+
+    @Test
+    fun generationParamsOmitNullIdSlot() {
+        val params = GenerationParams(
+            temperature = 1.0f,
+            topP = 1.0f,
+            topK = 0,
+            minP = 0.08f,
+            repeatPenalty = 1.02f,
+            maxTokens = 512,
+            idSlot = null,
+        )
+        val request = params.toRequest(
+            model = "test-model",
+            messages = listOf(ChatMessageDto(MessageRole.USER, "Hi")),
+            stream = false,
+        )
+        val json = Json {
+            encodeDefaults = true
+            explicitNulls = false
+        }.encodeToString(ChatCompletionRequest.serializer(), request)
+        assertFalse(json.contains("\"id_slot\""))
     }
 }

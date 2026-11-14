@@ -103,6 +103,12 @@
     <string name="chat_revise_prompt_title">Editar con prompt</string>
     <string name="chat_revise_prompt_hint">Ej.: Haz esta respuesta más sugerente, o menciona algo que pasó antes…</string>
     <string name="chat_revise_prompt_apply">Reescribir</string>
+    <string name="chat_memory">Memoria</string>
+    <string name="chat_memory_title">Memoria del chat</string>
+    <string name="chat_memory_summary_label">Historia hasta ahora</string>
+    <string name="chat_memory_summary_hint">Resumen automático de eventos antiguos. Edítalo si hace falta.</string>
+    <string name="chat_memory_pinned_label">Hechos clave</string>
+    <string name="chat_memory_pinned_hint">Datos que el bot debe recordar siempre (nombres, lugares, promesas…).</string>
 
     <string name="settings_title">Ajustes</string>
     <string name="settings_connection">Conexión</string>
@@ -139,6 +145,12 @@
     <string name="settings_min_p_desc">Umbral mínimo relativo. Filtra tokens poco probables. Más alto = respuestas más seguras y menos raras.</string>
     <string name="settings_repeat_penalty">Repeat penalty</string>
     <string name="settings_repeat_penalty_desc">Penaliza repetir lo mismo. Más alto = menos bucles y repeticiones; demasiado alto puede sonar forzado.</string>
+    <string name="settings_dry_multiplier">DRY multiplier</string>
+    <string name="settings_dry_multiplier_desc">Penaliza secuencias ya presentes en el contexto. Más alto = más variedad entre turnos. 0 desactiva DRY.</string>
+    <string name="settings_xtc_probability">XTC probability</string>
+    <string name="settings_xtc_probability_desc">Probabilidad de descartar el token más obvio para variar las aperturas. Más alto = más sorpresa.</string>
+    <string name="settings_xtc_threshold">XTC threshold</string>
+    <string name="settings_xtc_threshold_desc">Confianza mínima de un token para que XTC pueda descartarlo. Más bajo = más agresivo.</string>
     <string name="settings_max_tokens">Max tokens (por respuesta)</string>
     <string name="settings_max_tokens_desc">Tope de tokens que el bot puede generar en UN mensaje. No es el tamaño del chat completo. Sube esto si quieres respuestas más largas (hasta 4096). En los logs del servidor esto es n_gen / eval tokens, no n_tokens.</string>
     <string name="settings_context_size">Context size (memoria del chat)</string>

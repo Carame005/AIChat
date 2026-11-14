@@ -52,6 +52,12 @@ data class ConversationEntity(
     val personaId: String? = null,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
+    /** Rolling long-term memory summarized from messages older than the cut point. */
+    val summary: String = "",
+    /** Last message id included in [summary]; history after this id is sent raw. */
+    val summaryUpToMessageId: String? = null,
+    /** User-editable key facts always injected into the system prompt. */
+    val pinnedMemory: String = "",
 )
 
 @Entity(
@@ -64,7 +70,7 @@ data class ConversationEntity(
             onDelete = ForeignKey.CASCADE,
         ),
     ],
-    indices = [Index("conversationId")],
+    indices = [Index(value = ["conversationId", "createdAt"])],
 )
 data class MessageEntity(
     @PrimaryKey val id: String,

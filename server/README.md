@@ -13,7 +13,7 @@ Android talks to **llama-server** (OpenAI-compatible HTTP) on your PC in **route
 
 ## Minimum specs (Q4 / Q5)
 
-Default context in this repo: **8192**, one parallel slot.
+Default in this repo: server **-c 12288**, **-np 2** with **--kv-unified** (chat + summary). App prompt budget stays **8192**.
 
 | | **Q4_K_M** (~7.5 GB) | **Q5_K_M** (~8.7 GB) |
 |---|---|---|
@@ -46,7 +46,8 @@ CUDA must actually initialize (matching Windows CUDA build + cudart + driver). O
    ```
 
 Default API key: `caramel-local-key`  
-Listen: `0.0.0.0:8081`
+Listen: `0.0.0.0:8081`  
+Parallel: `-np 2 --kv-unified` (~0.6–1 GB extra VRAM vs `-np 1 -c 8192` on Q4)
 
 Logs: `logs\preflight.log`, `logs\llama-server.log`
 
@@ -55,7 +56,7 @@ Logs: `logs\preflight.log`, `logs\llama-server.log`
 - Base URL: `http://<PC-LAN-IP>:8081`
 - API key: `caramel-local-key`
 - Model: Q4 / Q5 in Settings (must exist under `models\`)
-- Context size: `8192` (must match `-c`)
+- Context size: `8192` (app budget; server uses `-c 12288`)
 
 ## Smoke tests
 

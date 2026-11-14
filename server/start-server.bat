@@ -24,9 +24,10 @@ REM 8080 is often taken on Windows; use 8081 by default.
 set "PORT=8081"
 REM auto = offload as many layers as fit in VRAM (99 often fails to 0 on 4 GB GPUs)
 set "NGL=auto"
-set "CTX=8192"
-REM One chat slot; default parallel multiplies KV and wastes VRAM
-set "NP=1"
+REM 12288: ~8k for chat + room for a background summary on a second parallel slot
+set "CTX=12288"
+REM Two slots: chat (id_slot 0) and summary (id_slot 1); --kv-unified shares the pool
+set "NP=2"
 REM Keep less free VRAM margin so more layers land on GPU (default fit-target is 1024 MiB)
 set "FIT_TARGET=128"
 REM Only one quant loaded at a time; switching from the app unloads the other
@@ -105,6 +106,7 @@ echo Models dir: %MODELS_DIR%
 if exist "%MODEL_Q4%" echo   - Chaos-Unknown-12b.Q4_K_M.gguf
 if exist "%MODEL_Q5%" echo   - Chaos-Unknown-12b.Q5_K_M.gguf
 echo Context: %CTX%  GPU layers: %NGL%  parallel: %NP%  fit-target: %FIT_TARGET% MiB  models-max: %MODELS_MAX%
+echo KV: unified pool (--kv-unified). Extra VRAM vs -np 1 / -c 8192: roughly 0.6-1 GB on Q4.
 echo API key: %API_KEY%
 echo Chat template: Mistral Instruct via --jinja
 echo Logging to: %LOG_FILE%  verbosity %LOG_VERBOSITY%
@@ -134,9 +136,11 @@ REM No -m: router mode. Autoload on request (needed or chat returns "model is no
   -ngl %NGL% ^
   -c %CTX% ^
   -np %NP% ^
+  --kv-unified ^
   -fit on ^
   -fitt %FIT_TARGET% ^
   --jinja ^
+  --cache-reuse 256 ^
   --api-key %API_KEY% ^
   --log-file "%LOG_FILE%" ^
   --log-verbosity %LOG_VERBOSITY% ^

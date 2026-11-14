@@ -92,6 +92,45 @@ interface ConversationDao {
     @Update
     suspend fun update(conversation: ConversationEntity)
 
+    @Query(
+        """
+        UPDATE conversations
+        SET summary = :summary, summaryUpToMessageId = :cutId, updatedAt = :updatedAt
+        WHERE id = :id
+        """,
+    )
+    suspend fun updateSummary(id: String, summary: String, cutId: String?, updatedAt: Long)
+
+    @Query(
+        """
+        UPDATE conversations
+        SET summary = :summary, pinnedMemory = :pinned, updatedAt = :updatedAt
+        WHERE id = :id
+        """,
+    )
+    suspend fun updateMemory(id: String, summary: String, pinned: String, updatedAt: Long)
+
+    @Query(
+        """
+        UPDATE conversations
+        SET personaId = :personaId, updatedAt = :updatedAt
+        WHERE id = :id
+        """,
+    )
+    suspend fun updatePersona(id: String, personaId: String?, updatedAt: Long)
+
+    @Query("UPDATE conversations SET updatedAt = :updatedAt WHERE id = :id")
+    suspend fun touch(id: String, updatedAt: Long)
+
+    @Query(
+        """
+        UPDATE conversations
+        SET summary = '', summaryUpToMessageId = NULL, updatedAt = :updatedAt
+        WHERE id = :id
+        """,
+    )
+    suspend fun clearSummary(id: String, updatedAt: Long)
+
     @Query("DELETE FROM conversations WHERE id = :id")
     suspend fun deleteById(id: String)
 }
@@ -103,6 +142,9 @@ interface MessageDao {
 
     @Query("SELECT * FROM messages WHERE conversationId = :conversationId ORDER BY createdAt ASC")
     suspend fun getByConversation(conversationId: String): List<MessageEntity>
+
+    @Query("SELECT * FROM messages WHERE id = :id LIMIT 1")
+    suspend fun getById(id: String): MessageEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(message: MessageEntity)
@@ -120,4 +162,12 @@ interface MessageDao {
         "DELETE FROM messages WHERE id = :id AND conversationId = :conversationId",
     )
     suspend fun deleteInConversation(id: String, conversationId: String)
+
+    @Query(
+        """
+        DELETE FROM messages
+        WHERE conversationId = :conversationId AND createdAt >= :fromCreatedAt
+        """,
+    )
+    suspend fun deleteFrom(conversationId: String, fromCreatedAt: Long)
 }

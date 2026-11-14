@@ -226,6 +226,30 @@ fun SettingsScreen(
                     range = 1f..1.5f,
                     onChange = { v -> viewModel.update { it.copy(repeatPenalty = v) } },
                 )
+                DescribedSlider(
+                    label = stringResource(R.string.settings_dry_multiplier),
+                    description = stringResource(R.string.settings_dry_multiplier_desc),
+                    valueLabel = "%.2f".format(settings.dryMultiplier),
+                    value = settings.dryMultiplier,
+                    range = 0f..2f,
+                    onChange = { v -> viewModel.update { it.copy(dryMultiplier = v) } },
+                )
+                DescribedSlider(
+                    label = stringResource(R.string.settings_xtc_probability),
+                    description = stringResource(R.string.settings_xtc_probability_desc),
+                    valueLabel = "%.2f".format(settings.xtcProbability),
+                    value = settings.xtcProbability,
+                    range = 0f..1f,
+                    onChange = { v -> viewModel.update { it.copy(xtcProbability = v) } },
+                )
+                DescribedSlider(
+                    label = stringResource(R.string.settings_xtc_threshold),
+                    description = stringResource(R.string.settings_xtc_threshold_desc),
+                    valueLabel = "%.2f".format(settings.xtcThreshold),
+                    value = settings.xtcThreshold,
+                    range = 0f..1f,
+                    onChange = { v -> viewModel.update { it.copy(xtcThreshold = v) } },
+                )
                 DescribedIntSlider(
                     label = stringResource(R.string.settings_max_tokens),
                     description = stringResource(R.string.settings_max_tokens_desc),

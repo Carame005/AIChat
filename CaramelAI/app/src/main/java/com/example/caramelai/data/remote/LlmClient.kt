@@ -26,7 +26,43 @@ data class GenerationParams(
     val minP: Float,
     val repeatPenalty: Float,
     val maxTokens: Int,
-)
+    val repeatLastN: Int = 64,
+    val dryMultiplier: Float = 0.8f,
+    val dryBase: Float = 1.75f,
+    val dryAllowedLength: Int = 2,
+    val dryPenaltyLastN: Int = -1,
+    val xtcProbability: Float = 0.5f,
+    val xtcThreshold: Float = 0.1f,
+    val cachePrompt: Boolean = true,
+    val idSlot: Int? = null,
+) {
+    fun toRequest(
+        model: String,
+        messages: List<ChatMessageDto>,
+        stream: Boolean,
+    ): ChatCompletionRequest = ChatCompletionRequest(
+        model = model,
+        messages = messages,
+        stream = stream,
+        temperature = temperature.toDouble(),
+        topP = topP.toDouble(),
+        topK = topK,
+        minP = minP.toDouble(),
+        repeatPenalty = repeatPenalty.toDouble(),
+        repeatLastN = repeatLastN.takeIf { it >= 0 },
+        dryMultiplier = dryMultiplier.toDouble(),
+        dryBase = dryBase.toDouble(),
+        dryAllowedLength = dryAllowedLength,
+        // llama-server OpenAI schema rejects -1 (0..INT_MAX only). Omit so the
+        // server keeps its internal default (whole context).
+        dryPenaltyLastN = dryPenaltyLastN.takeIf { it >= 0 },
+        xtcProbability = xtcProbability.toDouble(),
+        xtcThreshold = xtcThreshold.toDouble(),
+        cachePrompt = cachePrompt,
+        maxTokens = maxTokens,
+        idSlot = idSlot,
+    )
+}
 
 sealed interface ChatStreamEvent {
     data class Chunk(val text: String) : ChatStreamEvent
@@ -37,6 +73,7 @@ class LlmClient(
     private val json: Json = Json {
         ignoreUnknownKeys = true
         encodeDefaults = true
+        explicitNulls = false
     },
 ) {
     private val client: OkHttpClient = OkHttpClient.Builder()
@@ -54,96 +91,44 @@ class LlmClient(
         .readTimeout(5, TimeUnit.MINUTES)
         .build()
 
-    suspend fun health(baseUrl: String, apiKey: String): Result<String> {
-        val trimmed = baseUrl.trim().trimEnd('/')
-        if (trimmed.isBlank()) {
-            return Result.failure(IOException("Base URL is empty"))
-        }
-        if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
-            return Result.failure(
-                IOException("Base URL must start with http:// (got: $trimmed)"),
-            )
-        }
-        val url = "$trimmed/health"
-        return suspendCancellableCoroutine { cont ->
-            val builder = Request.Builder().url(url).get()
-            if (apiKey.isNotBlank()) {
-                builder.header("Authorization", "Bearer $apiKey")
-            }
-            val call = healthClient.newCall(builder.build())
-            cont.invokeOnCancellation { call.cancel() }
-            call.enqueue(object : Callback {
-                override fun onFailure(call: Call, e: IOException) {
-                    if (!cont.isActive) return
-                    val detail = e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
-                    cont.resume(
-                        Result.failure(
-                            IOException(
-                                "Cannot reach $url ($detail). Use the PC LAN IP and port, e.g. http://192.168.x.x:8081",
-                                e,
-                            ),
-                        ),
-                    )
-                }
-
-                override fun onResponse(call: Call, response: Response) {
-                    response.use {
-                        val body = it.body?.string().orEmpty()
-                        if (it.isSuccessful) {
-                            cont.resume(Result.success(body.ifBlank { "ok" }))
-                        } else {
-                            cont.resume(
-                                Result.failure(
-                                    IOException("HTTP ${it.code} from $url: $body"),
-                                ),
-                            )
-                        }
-                    }
-                }
-            })
+    suspend fun fetchServerContext(baseUrl: String, apiKey: String): Result<Int> {
+        val base = normalizeBaseUrl(baseUrl).getOrElse { return Result.failure(it) }
+        val url = "$base/props"
+        return getJson(url, apiKey, healthClient).mapCatching { body ->
+            json.decodeFromString(ServerPropsResponse.serializer(), body)
+                .defaultGenerationSettings?.nCtx
+                ?: error("n_ctx missing in /props")
         }
     }
 
-    suspend fun listModels(baseUrl: String, apiKey: String): Result<List<String>> {
-        val trimmed = baseUrl.trim().trimEnd('/')
-        if (trimmed.isBlank()) {
-            return Result.failure(IOException("Base URL is empty"))
-        }
-        val url = "$trimmed/v1/models"
-        return suspendCancellableCoroutine { cont ->
-            val builder = Request.Builder().url(url).get()
-            if (apiKey.isNotBlank()) {
-                builder.header("Authorization", "Bearer $apiKey")
-            }
-            val call = healthClient.newCall(builder.build())
-            cont.invokeOnCancellation { call.cancel() }
-            call.enqueue(object : Callback {
-                override fun onFailure(call: Call, e: IOException) {
-                    if (!cont.isActive) return
-                    cont.resume(Result.failure(e))
+    suspend fun health(baseUrl: String, apiKey: String): Result<String> {
+        val base = normalizeBaseUrl(baseUrl).getOrElse { return Result.failure(it) }
+        val url = "$base/health"
+        return getJson(url, apiKey, healthClient).fold(
+            onSuccess = { body -> Result.success(body.ifBlank { "ok" }) },
+            onFailure = { err ->
+                val msg = err.message.orEmpty()
+                if (msg.startsWith("HTTP ")) {
+                    Result.failure(err)
+                } else {
+                    val detail = msg.takeIf { it.isNotBlank() } ?: err.javaClass.simpleName
+                    Result.failure(
+                        IOException(
+                            "Cannot reach $url ($detail). Use the PC LAN IP and port, e.g. http://192.168.x.x:8081",
+                            err,
+                        ),
+                    )
                 }
+            },
+        )
+    }
 
-                override fun onResponse(call: Call, response: Response) {
-                    response.use {
-                        val body = it.body?.string().orEmpty()
-                        if (!it.isSuccessful) {
-                            cont.resume(
-                                Result.failure(IOException("HTTP ${it.code} from $url: $body")),
-                            )
-                            return
-                        }
-                        runCatching {
-                            json.decodeFromString(ModelsListResponse.serializer(), body)
-                                .data.map { model -> model.id }
-                        }.fold(
-                            onSuccess = { ids -> cont.resume(Result.success(ids)) },
-                            onFailure = { err ->
-                                cont.resume(Result.failure(IOException(err.message, err)))
-                            },
-                        )
-                    }
-                }
-            })
+    suspend fun listModels(baseUrl: String, apiKey: String): Result<List<String>> {
+        val base = normalizeBaseUrl(baseUrl).getOrElse { return Result.failure(it) }
+        val url = "$base/v1/models"
+        return getJson(url, apiKey, healthClient).mapCatching { body ->
+            json.decodeFromString(ModelsListResponse.serializer(), body)
+                .data.map { model -> model.id }
         }
     }
 
@@ -154,20 +139,11 @@ class LlmClient(
         messages: List<ChatMessageDto>,
         params: GenerationParams,
     ): Result<String> {
-        val requestBody = ChatCompletionRequest(
-            model = model,
-            messages = messages,
-            stream = false,
-            temperature = params.temperature.toDouble(),
-            topP = params.topP.toDouble(),
-            topK = params.topK,
-            minP = params.minP.toDouble(),
-            repeatPenalty = params.repeatPenalty.toDouble(),
-            maxTokens = params.maxTokens,
-        )
+        val base = normalizeBaseUrl(baseUrl).getOrElse { return Result.failure(it) }
+        val requestBody = params.toRequest(model = model, messages = messages, stream = false)
         val payload = json.encodeToString(ChatCompletionRequest.serializer(), requestBody)
         // autoload=true: llama-server router loads the model on first request if needed
-        val url = baseUrl.trimEnd('/') + "/v1/chat/completions?autoload=true"
+        val url = "$base/v1/chat/completions?autoload=true"
         return suspendCancellableCoroutine { cont ->
             val builder = Request.Builder()
                 .url(url)
@@ -221,19 +197,13 @@ class LlmClient(
         messages: List<ChatMessageDto>,
         params: GenerationParams,
     ): Flow<ChatStreamEvent> = callbackFlow {
-        val requestBody = ChatCompletionRequest(
-            model = model,
-            messages = messages,
-            stream = true,
-            temperature = params.temperature.toDouble(),
-            topP = params.topP.toDouble(),
-            topK = params.topK,
-            minP = params.minP.toDouble(),
-            repeatPenalty = params.repeatPenalty.toDouble(),
-            maxTokens = params.maxTokens,
-        )
+        val base = normalizeBaseUrl(baseUrl).getOrElse {
+            close(it)
+            return@callbackFlow
+        }
+        val requestBody = params.toRequest(model = model, messages = messages, stream = true)
         val payload = json.encodeToString(ChatCompletionRequest.serializer(), requestBody)
-        val url = baseUrl.trimEnd('/') + "/v1/chat/completions?autoload=true"
+        val url = "$base/v1/chat/completions?autoload=true"
         val builder = Request.Builder()
             .url(url)
             .post(payload.toRequestBody("application/json".toMediaType()))
@@ -284,9 +254,19 @@ class LlmClient(
                 t: Throwable?,
                 response: Response?,
             ) {
-                val message = t?.message
-                    ?: response?.let { "HTTP ${it.code}" }
-                    ?: "Streaming failed"
+                val body = response?.let { resp ->
+                    runCatching { resp.body?.string().orEmpty() }.getOrDefault("")
+                }.orEmpty()
+                val message = when {
+                    response != null && body.isNotBlank() ->
+                        "HTTP ${response.code}: $body"
+                    response != null ->
+                        "HTTP ${response.code}"
+                    !t?.message.isNullOrBlank() ->
+                        t!!.message!!
+                    else ->
+                        "Streaming failed"
+                }
                 close(IOException(message, t))
             }
 
@@ -297,5 +277,55 @@ class LlmClient(
 
         val eventSource = factory.newEventSource(request, listener)
         awaitClose { eventSource.cancel() }
+    }
+
+    private fun normalizeBaseUrl(baseUrl: String): Result<String> {
+        val trimmed = baseUrl.trim().trimEnd('/')
+        if (trimmed.isBlank()) {
+            return Result.failure(IOException("Base URL is empty"))
+        }
+        if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
+            return Result.failure(
+                IOException("Base URL must start with http:// (got: $trimmed)"),
+            )
+        }
+        return Result.success(trimmed)
+    }
+
+    private suspend fun getJson(
+        url: String,
+        apiKey: String,
+        httpClient: OkHttpClient,
+    ): Result<String> = suspendCancellableCoroutine { cont ->
+        val builder = Request.Builder().url(url).get()
+        if (apiKey.isNotBlank()) {
+            builder.header("Authorization", "Bearer $apiKey")
+        }
+        val call = httpClient.newCall(builder.build())
+        cont.invokeOnCancellation { call.cancel() }
+        call.enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                if (!cont.isActive) return
+                cont.resume(Result.failure(e))
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                response.use {
+                    val body = it.body?.string().orEmpty()
+                    if (it.isSuccessful) {
+                        cont.resume(Result.success(body))
+                    } else {
+                        cont.resume(
+                            Result.failure(IOException("HTTP ${it.code} from $url: $body")),
+                        )
+                    }
+                }
+            }
+        })
+    }
+
+    companion object {
+        const val CHAT_SLOT = 0
+        const val SUMMARY_SLOT = 1
     }
 }

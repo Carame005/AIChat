@@ -16,7 +16,13 @@ class ConnectionChecker(
     suspend fun check(): ConnectionResult {
         val settings = settingsRepository.settings.first()
         return llmClient.health(settings.baseUrl, settings.apiKey).fold(
-            onSuccess = { ConnectionResult.Ok(it) },
+            onSuccess = { detail ->
+                llmClient.fetchServerContext(settings.baseUrl, settings.apiKey)
+                    .onSuccess { nCtx ->
+                        settingsRepository.update { it.copy(serverContextSize = nCtx) }
+                    }
+                ConnectionResult.Ok(detail)
+            },
             onFailure = { ConnectionResult.Failed(it.message ?: "Connection failed") },
         )
     }

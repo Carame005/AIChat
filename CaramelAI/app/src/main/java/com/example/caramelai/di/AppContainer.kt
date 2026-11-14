@@ -10,6 +10,7 @@ import com.example.caramelai.domain.ChatRepository
 import com.example.caramelai.domain.ConnectionChecker
 import com.example.caramelai.domain.PersonaRepository
 import com.example.caramelai.domain.PromptBuilder
+import com.example.caramelai.domain.SummaryCoordinator
 
 class AppContainer(context: Context) {
     private val appContext = context.applicationContext
@@ -34,6 +35,12 @@ class AppContainer(context: Context) {
         conversationDao = database.conversationDao(),
         messageDao = database.messageDao(),
         llmClient = llmClient,
+        promptBuilder = promptBuilder,
+        database = database,
+    )
+
+    val summaryCoordinator: SummaryCoordinator = SummaryCoordinator(
+        chatRepository = chatRepository,
         promptBuilder = promptBuilder,
     )
 
