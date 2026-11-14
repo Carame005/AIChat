@@ -95,6 +95,14 @@
     <string name="chat_branch_failed">No se pudo crear la rama</string>
     <string name="chat_character_missing">Personaje no encontrado</string>
     <string name="chat_with_name">Chat con %1$s</string>
+    <string name="chat_variant_counter">%1$d / %2$d</string>
+    <string name="cd_previous_variant">Versión anterior de la respuesta</string>
+    <string name="cd_next_variant">Versión siguiente de la respuesta</string>
+    <string name="chat_regenerate">Regenerar</string>
+    <string name="chat_revise_prompt">Editar con prompt</string>
+    <string name="chat_revise_prompt_title">Editar con prompt</string>
+    <string name="chat_revise_prompt_hint">Ej.: Haz esta respuesta más sugerente, o menciona algo que pasó antes…</string>
+    <string name="chat_revise_prompt_apply">Reescribir</string>
 
     <string name="settings_title">Ajustes</string>
     <string name="settings_connection">Conexión</string>

@@ -99,7 +99,7 @@ class CharacterEditorViewModel(
             val result = llmClient.complete(
                 baseUrl = settings.baseUrl,
                 apiKey = settings.apiKey,
-                model = settings.modelId,
+                model = com.example.caramelai.data.remote.LlmModels.normalizeId(settings.modelId),
                 messages = listOf(
                     ChatMessageDto(
                         role = "system",

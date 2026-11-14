@@ -166,7 +166,8 @@ class LlmClient(
             maxTokens = params.maxTokens,
         )
         val payload = json.encodeToString(ChatCompletionRequest.serializer(), requestBody)
-        val url = baseUrl.trimEnd('/') + "/v1/chat/completions"
+        // autoload=true: llama-server router loads the model on first request if needed
+        val url = baseUrl.trimEnd('/') + "/v1/chat/completions?autoload=true"
         return suspendCancellableCoroutine { cont ->
             val builder = Request.Builder()
                 .url(url)
@@ -232,7 +233,7 @@ class LlmClient(
             maxTokens = params.maxTokens,
         )
         val payload = json.encodeToString(ChatCompletionRequest.serializer(), requestBody)
-        val url = baseUrl.trimEnd('/') + "/v1/chat/completions"
+        val url = baseUrl.trimEnd('/') + "/v1/chat/completions?autoload=true"
         val builder = Request.Builder()
             .url(url)
             .post(payload.toRequestBody("application/json".toMediaType()))

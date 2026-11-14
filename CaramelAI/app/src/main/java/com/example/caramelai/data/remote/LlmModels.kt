@@ -2,7 +2,7 @@ package com.example.caramelai.data.remote
 
 /**
  * Catalog of models CaramelAI knows how to request from llama-server router mode.
- * [id] must match the GGUF filename exposed by GET /v1/models (--models-dir).
+ * [id] must match GET /v1/models (llama.cpp --models-dir uses the stem, without ".gguf").
  */
 data class KnownLlmModel(
     val id: String,
@@ -10,11 +10,18 @@ data class KnownLlmModel(
 
 object LlmModels {
     val known: List<KnownLlmModel> = listOf(
-        KnownLlmModel(id = "Chaos-Unknown-12b.Q4_K_M.gguf"),
-        KnownLlmModel(id = "Chaos-Unknown-12b.Q5_K_M.gguf"),
+        KnownLlmModel(id = "Chaos-Unknown-12b.Q4_K_M"),
+        KnownLlmModel(id = "Chaos-Unknown-12b.Q5_K_M"),
     )
 
     val defaultId: String = known.first().id
 
-    fun find(id: String): KnownLlmModel? = known.find { it.id == id }
+    fun find(id: String): KnownLlmModel? {
+        val normalized = normalizeId(id)
+        return known.find { it.id == normalized }
+    }
+
+    /** Router model ids are the GGUF filename without extension. */
+    fun normalizeId(id: String): String =
+        id.substringAfterLast('/').removeSuffix(".gguf")
 }

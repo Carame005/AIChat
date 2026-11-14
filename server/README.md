@@ -68,7 +68,10 @@ curl http://127.0.0.1:8081/v1/models ^
 curl http://127.0.0.1:8081/v1/chat/completions ^
   -H "Authorization: Bearer caramel-local-key" ^
   -H "Content-Type: application/json" ^
-  -d "{\"model\":\"Chaos-Unknown-12b.Q4_K_M.gguf\",\"messages\":[{\"role\":\"user\",\"content\":\"Hi\"}],\"stream\":false}"
+  -d "{\"model\":\"Chaos-Unknown-12b.Q4_K_M\",\"messages\":[{\"role\":\"user\",\"content\":\"Hi\"}],\"stream\":false}"
+```
+
+Router model ids are the GGUF **stem** (no `.gguf` suffix), as returned by `GET /v1/models`.
 ```
 
 ## Notes

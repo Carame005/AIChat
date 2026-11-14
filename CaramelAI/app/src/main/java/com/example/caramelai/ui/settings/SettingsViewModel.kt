@@ -127,18 +127,22 @@ class SettingsViewModel(
                 val idSet = ids.toSet()
                 _serverModelIds.value = idSet
                 val options = LlmModels.known.map { known ->
+                    val remoteId = idSet.firstOrNull { remote -> matchesModelId(known.id, remote) }
                     ModelOptionUi(
-                        model = known,
-                        availableOnServer = idSet.any { remote -> matchesModelId(known.id, remote) },
+                        model = if (remoteId != null) known.copy(id = LlmModels.normalizeId(remoteId)) else known,
+                        availableOnServer = remoteId != null,
                     )
                 }
                 _modelOptions.value = options
-                val selected = settingsRepository.settings.first().modelId
+                val selected = LlmModels.normalizeId(settingsRepository.settings.first().modelId)
                 val selectedAvailable = options.any { it.model.id == selected && it.availableOnServer }
                 if (!selectedAvailable) {
                     options.firstOrNull { it.availableOnServer }?.let { fallback ->
                         settingsRepository.update { it.copy(modelId = fallback.model.id) }
                     }
+                } else if (selected != settingsRepository.settings.first().modelId) {
+                    // Migrate stored "*.gguf" ids to router stems.
+                    settingsRepository.update { it.copy(modelId = selected) }
                 }
             }
             .onFailure {

@@ -37,6 +37,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.caramelai.R
+import com.example.caramelai.data.remote.LlmModels
 import com.example.caramelai.data.settings.AppLanguage
 import com.example.caramelai.ui.components.CaramelButton
 import com.example.caramelai.ui.components.CaramelButtonStyle
@@ -252,16 +253,16 @@ fun SettingsScreen(
 }
 
 @Composable
-private fun knownModelName(modelId: String): String = when (modelId) {
-    "Chaos-Unknown-12b.Q4_K_M.gguf" -> stringResource(R.string.settings_model_q4_name)
-    "Chaos-Unknown-12b.Q5_K_M.gguf" -> stringResource(R.string.settings_model_q5_name)
+private fun knownModelName(modelId: String): String = when (LlmModels.normalizeId(modelId)) {
+    "Chaos-Unknown-12b.Q4_K_M" -> stringResource(R.string.settings_model_q4_name)
+    "Chaos-Unknown-12b.Q5_K_M" -> stringResource(R.string.settings_model_q5_name)
     else -> modelId
 }
 
 @Composable
-private fun knownModelDescription(modelId: String): String = when (modelId) {
-    "Chaos-Unknown-12b.Q4_K_M.gguf" -> stringResource(R.string.settings_model_q4_desc)
-    "Chaos-Unknown-12b.Q5_K_M.gguf" -> stringResource(R.string.settings_model_q5_desc)
+private fun knownModelDescription(modelId: String): String = when (LlmModels.normalizeId(modelId)) {
+    "Chaos-Unknown-12b.Q4_K_M" -> stringResource(R.string.settings_model_q4_desc)
+    "Chaos-Unknown-12b.Q5_K_M" -> stringResource(R.string.settings_model_q5_desc)
     else -> ""
 }
 

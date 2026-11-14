@@ -5,6 +5,7 @@ import com.example.caramelai.data.db.ConversationEntity
 import com.example.caramelai.data.db.MessageDao
 import com.example.caramelai.data.db.MessageEntity
 import com.example.caramelai.data.db.MessageRole
+import com.example.caramelai.data.db.MessageVariants
 import com.example.caramelai.data.db.PersonaEntity
 import com.example.caramelai.data.remote.ChatStreamEvent
 import com.example.caramelai.data.remote.GenerationParams
@@ -109,7 +110,12 @@ class ChatRepository(
         val index = messages.indexOfFirst { it.id == messageId }
         if (index < 0) return null
         val existing = messages[index]
-        val updated = existing.copy(content = content.trim())
+        val trimmed = content.trim()
+        val updated = MessageVariants.withActive(
+            existing,
+            variants = listOf(trimmed),
+            activeIndex = 0,
+        )
         messageDao.update(updated)
         deleteMessagesFrom(messages, index + 1)
         touchConversation(conversationId)
@@ -150,9 +156,45 @@ class ChatRepository(
         val existing = messages.firstOrNull { it.id == messageId } ?: return null
         if (existing.role != MessageRole.ASSISTANT) return null
         val cleaned = sanitizeAssistantOutput(conversationId, addition)
-        val updated = existing.copy(
-            content = promptBuilder.joinAssistantContinuation(existing.content, cleaned),
-        )
+        val joined = promptBuilder.joinAssistantContinuation(existing.content, cleaned)
+        val variants = MessageVariants.listOf(existing).toMutableList()
+        val index = existing.activeVariantIndex.coerceIn(0, variants.lastIndex)
+        variants[index] = joined
+        val updated = MessageVariants.withActive(existing, variants, index)
+        messageDao.update(updated)
+        touchConversation(conversationId)
+        return updated
+    }
+
+    /** Appends a regenerated reply as a new variant and selects it. */
+    suspend fun addAssistantVariant(
+        conversationId: String,
+        messageId: String,
+        content: String,
+    ): MessageEntity? {
+        val messages = messageDao.getByConversation(conversationId)
+        val existing = messages.firstOrNull { it.id == messageId } ?: return null
+        if (existing.role != MessageRole.ASSISTANT) return null
+        val cleaned = sanitizeAssistantOutput(conversationId, content)
+        if (cleaned.isBlank()) return existing
+        val variants = MessageVariants.listOf(existing) + cleaned
+        val updated = MessageVariants.withActive(existing, variants, variants.lastIndex)
+        messageDao.update(updated)
+        touchConversation(conversationId)
+        return updated
+    }
+
+    suspend fun setActiveVariant(
+        conversationId: String,
+        messageId: String,
+        index: Int,
+    ): MessageEntity? {
+        val messages = messageDao.getByConversation(conversationId)
+        val existing = messages.firstOrNull { it.id == messageId } ?: return null
+        if (existing.role != MessageRole.ASSISTANT) return null
+        val variants = MessageVariants.listOf(existing)
+        if (variants.isEmpty()) return existing
+        val updated = MessageVariants.withActive(existing, variants, index)
         messageDao.update(updated)
         touchConversation(conversationId)
         return updated
@@ -194,12 +236,16 @@ class ChatRepository(
         settings: AppSettings,
         characterId: String,
         continueMode: Boolean = false,
+        excludeMessageId: String? = null,
+        avoidTexts: List<String> = emptyList(),
+        revisionInstruction: String? = null,
     ): Flow<ChatStreamEvent> = flow {
         val character = characterRepository.getById(characterId)
             ?: error("Character not found")
         val conversation = conversationDao.getById(conversationId)
         val persona = resolvePersona(conversation?.personaId, settings)
         val history = messageDao.getByConversation(conversationId)
+            .filter { excludeMessageId == null || it.id != excludeMessageId }
         val messages = promptBuilder.build(
             character = character,
             history = history,
@@ -209,19 +255,30 @@ class ChatRepository(
             maxTokens = settings.maxTokens,
             continueMode = continueMode,
             globalBehavior = settings.globalBehavior,
+            avoidTexts = avoidTexts,
+            revisionInstruction = revisionInstruction,
         )
+        val rewriting = avoidTexts.isNotEmpty() || !revisionInstruction.isNullOrBlank()
         val params = GenerationParams(
-            temperature = settings.temperature,
+            temperature = if (rewriting) {
+                (settings.temperature + 0.15f).coerceAtMost(1.5f)
+            } else {
+                settings.temperature
+            },
             topP = settings.topP,
             topK = settings.topK,
             minP = settings.minP,
-            repeatPenalty = settings.repeatPenalty,
+            repeatPenalty = if (rewriting) {
+                (settings.repeatPenalty + 0.05f).coerceAtMost(1.5f)
+            } else {
+                settings.repeatPenalty
+            },
             maxTokens = settings.maxTokens,
         )
         llmClient.streamChat(
             baseUrl = settings.baseUrl,
             apiKey = settings.apiKey,
-            model = settings.modelId,
+            model = com.example.caramelai.data.remote.LlmModels.normalizeId(settings.modelId),
             messages = messages,
             params = params,
         ).collect { emit(it) }

@@ -59,7 +59,7 @@ class SettingsRepository(context: Context) {
             val next = transform(prefs.toSettings())
             prefs[Keys.BASE_URL] = next.baseUrl
             prefs[Keys.API_KEY] = next.apiKey
-            prefs[Keys.MODEL_ID] = next.modelId
+            prefs[Keys.MODEL_ID] = LlmModels.normalizeId(next.modelId)
             prefs[Keys.LANGUAGE] = next.language.tag
             prefs[Keys.USER_NAME] = next.userName
             prefs[Keys.TEMPERATURE] = next.temperature
@@ -85,7 +85,7 @@ class SettingsRepository(context: Context) {
         return AppSettings(
             baseUrl = this[Keys.BASE_URL] ?: defaults.baseUrl,
             apiKey = this[Keys.API_KEY] ?: defaults.apiKey,
-            modelId = this[Keys.MODEL_ID] ?: defaults.modelId,
+            modelId = LlmModels.normalizeId(this[Keys.MODEL_ID] ?: defaults.modelId),
             language = AppLanguage.fromTag(this[Keys.LANGUAGE] ?: defaults.language.tag),
             userName = this[Keys.USER_NAME] ?: defaults.userName,
             temperature = this[Keys.TEMPERATURE] ?: defaults.temperature,

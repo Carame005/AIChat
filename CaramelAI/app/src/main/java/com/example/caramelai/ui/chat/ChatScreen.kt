@@ -33,7 +33,10 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
@@ -77,6 +80,7 @@ import com.example.caramelai.R
 import com.example.caramelai.data.db.CharacterEntity
 import com.example.caramelai.data.db.MessageEntity
 import com.example.caramelai.data.db.MessageRole
+import com.example.caramelai.data.db.MessageVariants
 import com.example.caramelai.data.db.PersonaEntity
 import com.example.caramelai.ui.components.Avatar
 import com.example.caramelai.ui.components.TypingDots
@@ -184,6 +188,15 @@ fun ChatScreen(
                 }
             }
 
+            val visibleMessages = remember(messages, uiState.regeneratingMessageId, uiState.isGenerating) {
+                if (uiState.isGenerating && uiState.regeneratingMessageId != null) {
+                    messages.filter { it.id != uiState.regeneratingMessageId }
+                } else {
+                    messages
+                }
+            }
+            val lastVisibleId = visibleMessages.lastOrNull()?.id
+
             LazyColumn(
                 state = listState,
                 modifier = Modifier
@@ -192,12 +205,29 @@ fun ChatScreen(
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                items(messages, key = { it.id }) { message ->
+                items(visibleMessages, key = { it.id }) { message ->
+                    val variants = MessageVariants.listOf(message)
+                    val showVariantNav = !uiState.isGenerating &&
+                        message.id == lastVisibleId &&
+                        message.role == MessageRole.ASSISTANT &&
+                        variants.size > 1
                     MessageRow(
                         message = message,
                         botAvatar = character?.avatarUri,
                         userAvatar = activePersona?.avatarUri,
                         onLongClick = { menuMessage = message },
+                        variantIndex = if (showVariantNav) {
+                            message.activeVariantIndex.coerceIn(0, variants.lastIndex)
+                        } else {
+                            null
+                        },
+                        variantCount = if (showVariantNav) variants.size else null,
+                        onPreviousVariant = {
+                            viewModel.selectPreviousVariant(message.id)
+                        },
+                        onNextVariant = {
+                            viewModel.selectNextVariant(message.id)
+                        },
                     )
                 }
                 if (uiState.streamingText.isNotEmpty()) {
@@ -455,6 +485,13 @@ fun ChatScreen(
                 }
                 if (isLastAssistant) {
                     TextButton(onClick = {
+                        viewModel.beginRevisePrompt()
+                        menuMessage = null
+                    }) {
+                        Icon(Icons.Default.AutoAwesome, contentDescription = null)
+                        Text("  ${stringResource(R.string.chat_revise_prompt)}")
+                    }
+                    TextButton(onClick = {
                         viewModel.regenerate()
                         menuMessage = null
                     }) {
@@ -462,7 +499,7 @@ fun ChatScreen(
                             painter = painterResource(R.drawable.ic_regenerate),
                             contentDescription = null,
                         )
-                        Text("  Regenerate")
+                        Text("  ${stringResource(R.string.chat_regenerate)}")
                     }
                 }
                 TextButton(onClick = {
@@ -498,6 +535,37 @@ fun ChatScreen(
             },
             dismissButton = {
                 TextButton(onClick = viewModel::cancelEdit) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            },
+        )
+    }
+
+    if (uiState.showRevisePrompt) {
+        AlertDialog(
+            onDismissRequest = viewModel::cancelRevisePrompt,
+            title = { Text(stringResource(R.string.chat_revise_prompt_title)) },
+            text = {
+                OutlinedTextField(
+                    value = uiState.revisePromptDraft,
+                    onValueChange = viewModel::updateRevisePromptDraft,
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 3,
+                    placeholder = {
+                        Text(stringResource(R.string.chat_revise_prompt_hint))
+                    },
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = viewModel::commitRevisePrompt,
+                    enabled = uiState.revisePromptDraft.isNotBlank(),
+                ) {
+                    Text(stringResource(R.string.chat_revise_prompt_apply))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::cancelRevisePrompt) {
                     Text(stringResource(R.string.action_cancel))
                 }
             },
@@ -662,6 +730,10 @@ private fun MessageRow(
     botAvatar: String?,
     userAvatar: String?,
     onLongClick: () -> Unit,
+    variantIndex: Int? = null,
+    variantCount: Int? = null,
+    onPreviousVariant: (() -> Unit)? = null,
+    onNextVariant: (() -> Unit)? = null,
 ) {
     val isUser = message.role == MessageRole.USER
     val colors = LocalCaramelColors.current
@@ -671,41 +743,95 @@ private fun MessageRow(
         bold = MaterialTheme.colorScheme.onSurface,
         normal = MaterialTheme.colorScheme.onSurface,
     )
-    Row(
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
-        verticalAlignment = Alignment.Bottom,
+        horizontalAlignment = if (isUser) Alignment.End else Alignment.Start,
     ) {
-        if (!isUser) {
-            Avatar(
-                uri = botAvatar,
-                contentDescription = null,
-                size = 28.dp,
-                rounded = false,
-                modifier = Modifier.padding(end = 8.dp),
-            )
-        }
-        Box(
-            modifier = Modifier
-                .fillMaxWidth(0.78f)
-                .clip(RoundedCornerShape(18.dp))
-                .background(if (isUser) colors.bubbleUser else colors.bubbleBot)
-                .combinedClickable(onClick = {}, onLongClick = onLongClick)
-                .padding(12.dp),
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
+            verticalAlignment = Alignment.Bottom,
         ) {
-            Text(
-                text = RoleplayFormatter.format(message.content, roleplayColors),
-                style = MaterialTheme.typography.bodyLarge,
-            )
+            if (!isUser) {
+                Avatar(
+                    uri = botAvatar,
+                    contentDescription = null,
+                    size = 28.dp,
+                    rounded = false,
+                    modifier = Modifier.padding(end = 8.dp),
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.78f)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(if (isUser) colors.bubbleUser else colors.bubbleBot)
+                    .combinedClickable(onClick = {}, onLongClick = onLongClick)
+                    .padding(12.dp),
+            ) {
+                Text(
+                    text = RoleplayFormatter.format(message.content, roleplayColors),
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+            }
+            if (isUser) {
+                Avatar(
+                    uri = userAvatar,
+                    contentDescription = null,
+                    size = 28.dp,
+                    rounded = false,
+                    modifier = Modifier.padding(start = 8.dp),
+                )
+            }
         }
-        if (isUser) {
-            Avatar(
-                uri = userAvatar,
-                contentDescription = null,
-                size = 28.dp,
-                rounded = false,
-                modifier = Modifier.padding(start = 8.dp),
-            )
+        if (variantIndex != null && variantCount != null && variantCount > 1) {
+            Row(
+                modifier = Modifier
+                    .padding(start = 36.dp, top = 4.dp)
+                    .fillMaxWidth(0.78f),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                IconButton(
+                    onClick = { onPreviousVariant?.invoke() },
+                    enabled = variantIndex > 0,
+                    modifier = Modifier.size(32.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                        contentDescription = stringResource(R.string.cd_previous_variant),
+                        tint = if (variantIndex > 0) {
+                            MaterialTheme.colorScheme.onSurface
+                        } else {
+                            colors.muted
+                        },
+                    )
+                }
+                Text(
+                    text = stringResource(
+                        R.string.chat_variant_counter,
+                        variantIndex + 1,
+                        variantCount,
+                    ),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colors.muted,
+                )
+                IconButton(
+                    onClick = { onNextVariant?.invoke() },
+                    enabled = variantIndex < variantCount - 1,
+                    modifier = Modifier.size(32.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = stringResource(R.string.cd_next_variant),
+                        tint = if (variantIndex < variantCount - 1) {
+                            MaterialTheme.colorScheme.onSurface
+                        } else {
+                            colors.muted
+                        },
+                    )
+                }
+            }
         }
     }
 }

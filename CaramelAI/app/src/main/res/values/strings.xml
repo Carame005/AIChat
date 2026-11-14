@@ -102,6 +102,14 @@
     <string name="chat_branch_failed">Could not create branch</string>
     <string name="chat_character_missing">Character not found</string>
     <string name="chat_with_name">Chat with %1$s</string>
+    <string name="chat_variant_counter">%1$d / %2$d</string>
+    <string name="cd_previous_variant">Previous reply version</string>
+    <string name="cd_next_variant">Next reply version</string>
+    <string name="chat_regenerate">Regenerate</string>
+    <string name="chat_revise_prompt">Edit with prompt</string>
+    <string name="chat_revise_prompt_title">Edit with prompt</string>
+    <string name="chat_revise_prompt_hint">e.g. Make this reply more suggestive, or mention what happened earlier…</string>
+    <string name="chat_revise_prompt_apply">Rewrite</string>
 
     <!-- Settings -->
     <string name="settings_title">Settings</string>

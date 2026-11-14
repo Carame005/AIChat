@@ -156,7 +156,7 @@ class PromptBuilderTest {
         val character = CharacterEntity(id = "1", name = "Ganyu")
         val history = listOf(
             MessageEntity("1", "c", MessageRole.USER, "Hi"),
-            MessageEntity("2", "c", MessageRole.ASSISTANT, "Hello"),
+            MessageEntity("2", "c", MessageRole.ASSISTANT, "Hello there, friend."),
         )
         val messages = builder.build(
             character = character,
@@ -169,7 +169,28 @@ class PromptBuilderTest {
         )
         assertEquals(MessageRole.USER, messages.last().role)
         assertTrue(messages.last().content.contains("Continue your previous"))
+        assertTrue(messages.last().content.contains("NOT a new answer"))
+        assertTrue(messages.last().content.contains("Hello there, friend."))
         assertTrue(messages.last().content.startsWith("Carlos:"))
+        assertTrue(messages.first().content.contains("CONTINUE your previous"))
+    }
+
+    @Test
+    fun trimContinuationOverlapStripsEchoedTailAndRestart() {
+        assertEquals(
+            "and then she smiled softly.",
+            builder.trimContinuationOverlap(
+                "*She looked away shyly, brushing hair behind her ear*",
+                "*She looked away shyly, brushing hair behind her ear* and then she smiled softly.",
+            ),
+        )
+        assertEquals(
+            "*His hand found hers gently.*",
+            builder.trimContinuationOverlap(
+                "He stepped closer until only a breath remained. \"Stay,\" he whispered.",
+                "\"Stay,\" he whispered.\n\n*His hand found hers gently.*",
+            ),
+        )
     }
 
     @Test
@@ -228,5 +249,52 @@ class PromptBuilderTest {
         assertTrue(normalized[0].content.contains("Two"))
         assertTrue(normalized[1].content.contains("A"))
         assertTrue(normalized[1].content.contains("B"))
+    }
+
+    @Test
+    fun regenerateAvoidTextsInjectsOocCue() {
+        val character = CharacterEntity(id = "1", name = "Ganyu")
+        val history = listOf(
+            MessageEntity("1", "c", MessageRole.USER, "Tell me a story"),
+        )
+        val rejected = "Once upon a time the exact same story began."
+        val messages = builder.build(
+            character = character,
+            history = history,
+            persona = null,
+            fallbackUserName = "Carlos",
+            contextSize = 8192,
+            maxTokens = 512,
+            avoidTexts = listOf(rejected),
+        )
+        assertEquals(MessageRole.USER, messages.last().role)
+        assertTrue(messages.last().content.contains("Regenerate your last reply"))
+        assertTrue(messages.last().content.contains(rejected))
+        assertTrue(messages.last().content.contains("Do NOT repeat"))
+    }
+
+    @Test
+    fun revisePromptInjectsInstructionAndPreviousVariants() {
+        val character = CharacterEntity(id = "1", name = "Ganyu")
+        val history = listOf(
+            MessageEntity("1", "c", MessageRole.USER, "Tell me a story"),
+        )
+        val previous = "A bland first draft of the reply."
+        val messages = builder.build(
+            character = character,
+            history = history,
+            persona = null,
+            fallbackUserName = "Carlos",
+            contextSize = 8192,
+            maxTokens = 512,
+            avoidTexts = listOf(previous),
+            revisionInstruction = "Make this reply more suggestive",
+        )
+        assertEquals(MessageRole.USER, messages.last().role)
+        assertTrue(messages.last().content.contains("Rewrite your last reply"))
+        assertTrue(messages.last().content.contains("Make this reply more suggestive"))
+        assertTrue(messages.last().content.contains(previous))
+        assertTrue(messages.last().content.contains("Previous versions"))
+        assertTrue(!messages.last().content.contains("Regenerate your last reply"))
     }
 }

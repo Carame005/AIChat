@@ -4,6 +4,9 @@ import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 
 @Entity(tableName = "characters")
 data class CharacterEntity(
@@ -69,10 +72,46 @@ data class MessageEntity(
     val role: String,
     val content: String,
     val createdAt: Long = System.currentTimeMillis(),
+    /** JSON array of regenerated texts for this turn. Empty means [content] only. */
+    val variantsJson: String = "[]",
+    val activeVariantIndex: Int = 0,
 )
 
 object MessageRole {
     const val USER = "user"
     const val ASSISTANT = "assistant"
     const val SYSTEM = "system"
+}
+
+object MessageVariants {
+    private val json = Json {
+        ignoreUnknownKeys = true
+        encodeDefaults = true
+    }
+
+    fun decode(variantsJson: String): List<String> {
+        if (variantsJson.isBlank() || variantsJson == "[]") return emptyList()
+        return runCatching {
+            json.decodeFromString<List<String>>(variantsJson)
+        }.getOrDefault(emptyList())
+    }
+
+    fun encode(variants: List<String>): String =
+        json.encodeToString(variants)
+
+    /** Always returns at least the current [MessageEntity.content]. */
+    fun listOf(message: MessageEntity): List<String> {
+        val decoded = decode(message.variantsJson).filter { it.isNotBlank() }
+        return if (decoded.isEmpty()) listOf(message.content) else decoded
+    }
+
+    fun withActive(message: MessageEntity, variants: List<String>, activeIndex: Int): MessageEntity {
+        val safe = variants.filter { it.isNotBlank() }.ifEmpty { listOf(message.content) }
+        val index = activeIndex.coerceIn(0, safe.lastIndex)
+        return message.copy(
+            content = safe[index],
+            variantsJson = encode(safe),
+            activeVariantIndex = index,
+        )
+    }
 }

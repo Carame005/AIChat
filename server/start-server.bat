@@ -110,7 +110,7 @@ echo Chat template: Mistral Instruct via --jinja
 echo Logging to: %LOG_FILE%  verbosity %LOG_VERBOSITY%
 echo Preflight: %DIAG_FILE%
 echo.
-echo Models load on first chat request from the app - no autoload.
+echo Models load when the app sends the first chat for that model id.
 echo Tip: while running, check VRAM with nvidia-smi
 echo.
 
@@ -125,11 +125,10 @@ for /f "tokens=5" %%p in ('netstat -ano ^| findstr /R /C:":%PORT% .*LISTENING"')
     taskkill /F /PID %%p >nul 2>&1
 )
 
-REM No -m: router mode. --no-models-autoload = wait for app "model" field (avoids startup OOM).
+REM No -m: router mode. Autoload on request (needed or chat returns "model is not loaded").
 "%LLAMA_SERVER%" ^
   --models-dir "%MODELS_DIR%" ^
   --models-max %MODELS_MAX% ^
-  --no-models-autoload ^
   --host %HOST% ^
   --port %PORT% ^
   -ngl %NGL% ^
