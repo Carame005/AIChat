@@ -98,7 +98,8 @@
     <string name="chat_history">Chat history</string>
     <string name="chat_new_chat">Start new chat</string>
     <string name="chat_specs_copied">Character card copied to clipboard</string>
-    <string name="chat_truncated_hint">Reply truncated by the token limit. Tap Continue to keep going.</string>
+    <string name="chat_truncated_hint">Reply hit the token limit and may be short. You can tap Continue to keep the bot talking.</string>
+    <string name="chat_continue_repeated">Continue kept repeating the previous reply. Try again or send a message.</string>
     <string name="chat_branch_failed">Could not create branch</string>
     <string name="chat_character_missing">Character not found</string>
     <string name="chat_with_name">Chat with %1$s</string>
@@ -116,6 +117,9 @@
     <string name="chat_memory_summary_hint">Auto-updated summary of older events. Edit if needed.</string>
     <string name="chat_memory_pinned_label">Key facts</string>
     <string name="chat_memory_pinned_hint">Facts the bot should always remember (names, places, promises…).</string>
+    <string name="chat_memory_updating">Updating memory…</string>
+    <string name="chat_memory_conflict">Memory was updated in the background. Review the new text and save again.</string>
+    <string name="chat_memory_restore_previous">Restore previous summary</string>
 
     <!-- Settings -->
     <string name="settings_title">Settings</string>

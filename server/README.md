@@ -13,7 +13,7 @@ Android talks to **llama-server** (OpenAI-compatible HTTP) on your PC in **route
 
 ## Minimum specs (Q4 / Q5)
 
-Default in this repo: server **-c 12288**, **-np 2** with **--kv-unified** (chat + summary). App prompt budget stays **8192**.
+Default in this repo: server **-c 12288**, **-np 2** with **--kv-unified** (chat + summary). App prompt budget stays **8192**. Raise `-c` to **14336** in `start-server.bat` if you have spare VRAM and long-chat summaries still fail.
 
 | | **Q4_K_M** (~7.5 GB) | **Q5_K_M** (~8.7 GB) |
 |---|---|---|

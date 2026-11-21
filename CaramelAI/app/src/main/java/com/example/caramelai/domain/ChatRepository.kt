@@ -86,17 +86,55 @@ class ChatRepository(
         )
     }
 
+    sealed interface MemoryUpdateResult {
+        data object Updated : MemoryUpdateResult
+        data class Conflict(val current: ConversationEntity) : MemoryUpdateResult
+    }
+
+    /**
+     * Compare-and-set memory write. Fails if [expectedSummary]/[expectedCut] no longer
+     * match the row (e.g. a background fold landed while the dialog was open).
+     * Blank [summary] also clears the cut so older turns become visible again.
+     */
     suspend fun updateConversationMemory(
         conversationId: String,
         summary: String,
         pinnedMemory: String,
-    ) {
-        conversationDao.updateMemory(
-            id = conversationId,
-            summary = summary.trim(),
-            pinned = pinnedMemory.trim(),
-            updatedAt = System.currentTimeMillis(),
-        )
+        expectedSummary: String,
+        expectedCut: String?,
+    ): MemoryUpdateResult = database.withTransaction {
+        val current = conversationDao.getById(conversationId)
+            ?: return@withTransaction MemoryUpdateResult.Conflict(
+                ConversationEntity(
+                    id = conversationId,
+                    characterId = "",
+                    title = "",
+                ),
+            )
+        if (current.summary != expectedSummary || current.summaryUpToMessageId != expectedCut) {
+            return@withTransaction MemoryUpdateResult.Conflict(current)
+        }
+        val trimmed = summary.trim()
+        val pinned = pinnedMemory.trim()
+        val now = System.currentTimeMillis()
+        if (trimmed.isEmpty()) {
+            conversationDao.updateMemoryAndCut(
+                id = conversationId,
+                summary = "",
+                cutId = null,
+                pinned = pinned,
+                updatedAt = now,
+            )
+        } else {
+            conversationDao.updateMemoryAndCut(
+                id = conversationId,
+                summary = trimmed,
+                cutId = current.summaryUpToMessageId,
+                pinned = pinned,
+                updatedAt = now,
+            )
+        }
+        MemoryUpdateResult.Updated
     }
 
     suspend fun addUserMessage(conversationId: String, content: String): MessageEntity {
@@ -247,6 +285,8 @@ class ChatRepository(
         val branchedSummaryCut = source.summaryUpToMessageId
             ?.takeIf { cutId -> kept.any { it.id == cutId } }
             ?.let { idMap[it] }
+        // Cut after the branch point (or missing) would leave future facts in memory.
+        val keepSummary = branchedSummaryCut != null && source.summary.isNotBlank()
         val branched = ConversationEntity(
             id = UUID.randomUUID().toString(),
             characterId = source.characterId,
@@ -254,9 +294,10 @@ class ChatRepository(
             personaId = source.personaId,
             createdAt = now,
             updatedAt = now,
-            summary = source.summary,
-            summaryUpToMessageId = branchedSummaryCut,
+            summary = if (keepSummary) source.summary else "",
+            summaryUpToMessageId = if (keepSummary) branchedSummaryCut else null,
             pinnedMemory = source.pinnedMemory,
+            previousSummary = "",
         )
         conversationDao.upsert(branched)
         val copies = kept.mapIndexed { index, message ->
@@ -285,6 +326,7 @@ class ChatRepository(
         avoidTexts: List<String> = emptyList(),
         revisionInstruction: String? = null,
         strengthenStyleNote: Boolean = false,
+        continueRejectedOpening: String? = null,
     ): Flow<ChatStreamEvent> = flow {
         val plan = prepareStreamReply(
             conversationId = conversationId,
@@ -295,6 +337,7 @@ class ChatRepository(
             avoidTexts = avoidTexts,
             revisionInstruction = revisionInstruction,
             strengthenStyleNote = strengthenStyleNote,
+            continueRejectedOpening = continueRejectedOpening,
         )
         plan.events.collect { emit(it) }
     }
@@ -308,35 +351,168 @@ class ChatRepository(
         avoidTexts: List<String> = emptyList(),
         revisionInstruction: String? = null,
         strengthenStyleNote: Boolean = false,
+        continueRejectedOpening: String? = null,
+        /**
+         * In-flight / shadow cut from [SummaryCoordinator]. When set (and ahead of
+         * the DB cut), history after this id is used so mid-update chats do not
+         * rediscover the same overflow.
+         */
+        effectiveSummaryCut: String? = null,
+        /** Drops already queued for fold — kept visible via provisional summary text. */
+        inFlightDropped: List<MessageEntity> = emptyList(),
+        fold: (suspend (
+            conversationId: String,
+            settings: AppSettings,
+            characterId: String,
+            cutId: String?,
+            dropped: List<MessageEntity>,
+        ) -> Boolean)? = null,
+        onSummarizing: ((Boolean) -> Unit)? = null,
     ): StreamReplyPlan {
         val character = characterRepository.getById(characterId)
             ?: error("Character not found")
-        val conversation = conversationDao.getById(conversationId)
-        val persona = resolvePersona(conversation?.personaId, settings)
+        val persona = resolvePersona(
+            conversationDao.getById(conversationId)?.personaId,
+            settings,
+        )
+        val userName = persona?.name?.takeIf { it.isNotBlank() } ?: settings.userName
         val history = messageDao.getByConversation(conversationId)
             .filter { excludeMessageId == null || it.id != excludeMessageId }
-        val built = promptBuilder.buildDetailed(
-            character = character,
-            history = history,
-            persona = persona,
-            fallbackUserName = settings.userName,
-            contextSize = settings.effectiveContextSize(),
-            maxTokens = settings.maxTokens,
-            continueMode = continueMode,
-            globalBehavior = settings.globalBehavior,
-            avoidTexts = avoidTexts,
-            revisionInstruction = revisionInstruction,
-            summary = conversation?.summary.orEmpty(),
-            pinnedMemory = conversation?.pinnedMemory.orEmpty(),
-            summaryUpToMessageId = conversation?.summaryUpToMessageId,
-            strengthenStyleNote = strengthenStyleNote,
-        )
-        val rewriting = avoidTexts.isNotEmpty() || !revisionInstruction.isNullOrBlank()
+
+        // Hard overflow only (ratio 1.0) advances the summary cut. Soft-trim must not.
+        var conversation = conversationDao.getById(conversationId)
+        val dbCut = conversation?.summaryUpToMessageId
+        val cutForBuild = when {
+            effectiveSummaryCut != null &&
+                promptBuilder.isCutAhead(history, dbCut, effectiveSummaryCut) ->
+                effectiveSummaryCut
+            else -> dbCut
+        }
+        val hadSummary = !conversation?.summary.isNullOrBlank() ||
+            !dbCut.isNullOrBlank() ||
+            cutForBuild != null
+        // Regen / revise-by-prompt discard the current reply; they must not advance
+        // the summary cut (avoid-texts would otherwise shrink the budget and "count").
+        val isRewrite = excludeMessageId != null
+
+        fun resolveCut(latestDbCut: String?): String? = when {
+            cutForBuild != null &&
+                promptBuilder.isCutAhead(history, latestDbCut, cutForBuild) -> cutForBuild
+            else -> latestDbCut
+        }
+
+        fun summaryWithInFlight(base: String, latestDbCut: String?): String {
+            val activeCut = resolveCut(latestDbCut)
+            if (inFlightDropped.isEmpty() || activeCut == null || activeCut == latestDbCut) {
+                return base
+            }
+            val pending = SummaryText.compactPendingTranscript(
+                dropped = inFlightDropped,
+                userName = userName,
+                characterName = character.name,
+            )
+            return SummaryText.mergeProvisionalSummary(existing = base, pending = pending)
+        }
+
+        suspend fun rebuild(summaryOverride: String? = null): PromptBuildResult {
+            val conv = conversationDao.getById(conversationId)
+            conversation = conv
+            val latestDbCut = conv?.summaryUpToMessageId
+            val baseSummary = summaryOverride ?: conv?.summary.orEmpty()
+            return promptBuilder.buildDetailed(
+                character = character,
+                history = history,
+                persona = persona,
+                fallbackUserName = settings.userName,
+                contextSize = settings.effectiveContextSize(),
+                maxTokens = settings.maxTokens,
+                continueMode = continueMode,
+                globalBehavior = settings.globalBehavior,
+                avoidTexts = avoidTexts,
+                revisionInstruction = revisionInstruction,
+                summary = if (summaryOverride != null) {
+                    baseSummary
+                } else {
+                    summaryWithInFlight(baseSummary, latestDbCut)
+                },
+                pinnedMemory = conv?.pinnedMemory.orEmpty(),
+                summaryUpToMessageId = resolveCut(latestDbCut),
+                strengthenStyleNote = strengthenStyleNote,
+                softTargetRatio = 1.0f,
+                continueRejectedOpening = continueRejectedOpening,
+            )
+        }
+
+        var built: PromptBuildResult
+        if (isRewrite) {
+            built = rebuild().copy(
+                newSummaryUpToMessageId = null,
+                droppedForSummary = emptyList(),
+            )
+        } else {
+            built = rebuild()
+
+            // Hard overflow: keep a bridge in the system prompt, fold in the background
+            // when warranted. Never block the reply on a sync summarizer (that made
+            // chats feel much slower than before).
+            if (built.droppedForSummary.isNotEmpty()) {
+                val dropSnapshot = built.droppedForSummary
+                val cutSnapshot = built.newSummaryUpToMessageId
+                val latestDbCut = conversationDao.getById(conversationId)?.summaryUpToMessageId
+                val shouldFold = promptBuilder.shouldAdvanceSummaryCut(
+                    history = history,
+                    currentCut = latestDbCut ?: cutForBuild,
+                    dropped = dropSnapshot,
+                    userName = userName,
+                    characterName = character.name,
+                )
+
+                suspend fun withBridgeProvisional(
+                    dropped: List<MessageEntity>,
+                ): PromptBuildResult {
+                    // Tail of dropped = closest to the live thread (what users notice).
+                    val bridge = if (dropped.size <= 10) {
+                        dropped
+                    } else {
+                        dropped.takeLast(10)
+                    }
+                    val pending = SummaryText.compactPendingTranscript(
+                        dropped = bridge,
+                        userName = userName,
+                        characterName = character.name,
+                    )
+                    val provisional = SummaryText.mergeProvisionalSummary(
+                        existing = conversationDao.getById(conversationId)?.summary.orEmpty(),
+                        pending = pending,
+                    )
+                    return rebuild(summaryOverride = provisional)
+                }
+
+                val bridged = withBridgeProvisional(dropSnapshot)
+                built = if (shouldFold) {
+                    // Schedule background fold; shadow cut + provisional cover the gap.
+                    bridged.copy(
+                        newSummaryUpToMessageId = cutSnapshot,
+                        droppedForSummary = dropSnapshot,
+                    )
+                } else {
+                    // Not folding yet — still keep the bridge so context is not erased.
+                    bridged.copy(
+                        newSummaryUpToMessageId = null,
+                        droppedForSummary = emptyList(),
+                    )
+                }
+            }
+        }
+
+        val revising = !revisionInstruction.isNullOrBlank()
+        val regenerating = avoidTexts.isNotEmpty() && !revising
         val params = GenerationParams(
-            temperature = if (rewriting) {
-                (settings.temperature + 0.15f).coerceAtMost(1.5f)
-            } else {
-                settings.temperature
+            temperature = when {
+                // Instruction-following needs lower entropy than free regen.
+                revising -> (settings.temperature * 0.7f).coerceIn(0.45f, 0.85f)
+                regenerating -> (settings.temperature + 0.15f).coerceAtMost(1.5f)
+                else -> settings.temperature
             },
             topP = settings.topP,
             topK = settings.topK,
@@ -344,15 +520,19 @@ class ChatRepository(
             repeatPenalty = settings.repeatPenalty,
             maxTokens = settings.maxTokens,
             repeatLastN = settings.repeatLastN,
-            dryMultiplier = if (rewriting) {
-                (settings.dryMultiplier + 0.2f).coerceAtMost(2.0f)
-            } else {
-                settings.dryMultiplier
+            dryMultiplier = when {
+                revising -> (settings.dryMultiplier * 0.5f).coerceAtLeast(0f)
+                regenerating -> (settings.dryMultiplier + 0.2f).coerceAtMost(2.0f)
+                else -> settings.dryMultiplier
             },
             dryBase = settings.dryBase,
             dryAllowedLength = settings.dryAllowedLength,
             dryPenaltyLastN = settings.dryPenaltyLastN,
-            xtcProbability = settings.xtcProbability,
+            xtcProbability = if (revising) {
+                (settings.xtcProbability * 0.5f).coerceAtLeast(0f)
+            } else {
+                settings.xtcProbability
+            },
             xtcThreshold = settings.xtcThreshold,
             idSlot = LlmClient.CHAT_SLOT,
         )
@@ -384,6 +564,29 @@ class ChatRepository(
     }
 
     /**
+     * Saves a "skip my turn" reply as a new assistant message, stripping any
+     * echoed overlap with the previous assistant text.
+     */
+    suspend fun saveContinuationMessage(
+        conversationId: String,
+        previousContent: String,
+        content: String,
+    ): MessageEntity? {
+        val cleaned = sanitizeAssistantOutput(conversationId, content)
+        val deduped = promptBuilder.trimContinuationOverlap(previousContent, cleaned)
+        if (deduped.isBlank()) return null
+        return saveAssistantMessage(conversationId, deduped)
+    }
+
+    suspend fun updatePinnedMemory(conversationId: String, pinnedMemory: String) {
+        conversationDao.updatePinned(
+            id = conversationId,
+            pinned = pinnedMemory.trim(),
+            updatedAt = System.currentTimeMillis(),
+        )
+    }
+
+    /**
      * Folds [dropped] into the conversation summary after a block trim.
      * Safe to call after the user-facing reply is already saved.
      * Returns false if summarization failed or the cut was invalidated mid-flight
@@ -399,29 +602,52 @@ class ChatRepository(
         if (dropped.isEmpty() && newCutId == null) return true
         val conversation = conversationDao.getById(conversationId) ?: return false
         val expectedCut = conversation.summaryUpToMessageId
+        val history = messageDao.getByConversation(conversationId)
+        if (newCutId != null && !promptBuilder.isCutAhead(history, expectedCut, newCutId)) {
+            return false
+        }
         val character = characterRepository.getById(characterId)
         val persona = resolvePersona(conversation.personaId, settings)
         val userName = persona?.name?.takeIf { it.isNotBlank() } ?: settings.userName
         val charName = character?.name ?: "Character"
 
         val mergedSummary = if (dropped.isEmpty()) {
-            conversation.summary
+            SummaryText.sanitize(conversation.summary)
         } else {
-            summarizeDropped(
+            // Closing beat feeds a dedicated present micro-pass — never persist raw dialogue.
+            val closingBeat = SummaryText.closingBeatFromDropped(
+                dropped = dropped,
+                userName = userName,
+                characterName = charName,
+            )
+            val folded = summarizeDropped(
                 settings = settings,
                 characterName = charName,
                 userName = userName,
-                previousSummary = conversation.summary,
+                previousSummary = SummaryText.stripPresentClosing(
+                    SummaryText.stripForPersistence(conversation.summary),
+                ),
                 dropped = dropped,
+                closingBeat = closingBeat,
             ) ?: return false
+            val present = summarizePresentBeat(settings, closingBeat) ?: return false
+            val withPresent = SummaryText.ensurePresentClosing(folded, present)
+            // ensurePresentClosing drops dialogue-looking present; treat as fold failure.
+            if (SummaryText.extractPresentClosing(withPresent).isNullOrBlank()) return false
+            finalizeSummaryText(settings, withPresent)
         }
 
-        // Re-read: discard if edit/delete invalidated the summary while we were generating.
+        // Re-read: discard if edit/delete or a manual memory edit raced us.
         val fresh = conversationDao.getById(conversationId) ?: return false
         if (fresh.summaryUpToMessageId != expectedCut) return false
+        if (fresh.summary != conversation.summary) return false
         if (newCutId != null) {
             val stillExists = messageDao.getById(newCutId) != null
             if (!stillExists) return false
+            val freshHistory = messageDao.getByConversation(conversationId)
+            if (!promptBuilder.isCutAhead(freshHistory, fresh.summaryUpToMessageId, newCutId)) {
+                return false
+            }
         }
 
         conversationDao.updateSummary(
@@ -433,55 +659,192 @@ class ChatRepository(
         return true
     }
 
+    private suspend fun finalizeSummaryText(settings: AppSettings, text: String): String {
+        val present = SummaryText.extractPresentClosing(text)
+        val body = SummaryText.stripPresentClosing(text)
+        var result = SummaryText.sanitize(body)
+        if (result.length > SummaryText.MAX_SUMMARY_CHARS) {
+            val condensed = condenseSummary(settings, result)
+            result = if (condensed != null) {
+                SummaryText.sanitize(condensed)
+            } else {
+                SummaryText.sanitize(result)
+            }
+        }
+        return if (present.isNullOrBlank()) {
+            result
+        } else {
+            SummaryText.ensurePresentClosing(result, present)
+        }
+    }
+
+    /**
+     * Tiny third-person beat for the fold cut. Returns null if the model fails,
+     * truncates, or emits labeled dialogue (which must never be persisted).
+     */
+    private suspend fun summarizePresentBeat(
+        settings: AppSettings,
+        closingBeat: String,
+    ): String? {
+        if (closingBeat.isBlank()) return null
+        val prompt = buildString {
+            appendLine("Write ONLY 2–4 sentences of third-person past-tense story memory.")
+            appendLine("Cover who is where, what just happened, and what is still open.")
+            appendLine("No dialogue, no speaker labels, no quotes, no markdown.")
+            appendLine("Finish every sentence.")
+            appendLine()
+            appendLine("Latest beats to paraphrase:")
+            appendLine(closingBeat.trim())
+            appendLine()
+            appendLine("Current situation:")
+        }
+        val result = runSummaryCompletion(settings, prompt, maxTokens = 150) ?: return null
+        if (result.finishReason.equals("length", ignoreCase = true)) return null
+        val text = result.text.trim()
+        if (text.isBlank() || SummaryText.looksLikeDialogue(text)) return null
+        // Drop accidental marker echo from the model.
+        return text.removePrefix(SummaryText.PRESENT_MARKER).trim()
+            .takeIf { it.isNotBlank() && !SummaryText.looksLikeDialogue(it) }
+    }
+
     private suspend fun summarizeDropped(
         settings: AppSettings,
         characterName: String,
         userName: String,
         previousSummary: String,
         dropped: List<MessageEntity>,
+        closingBeat: String = "",
     ): String? {
-        val chunks = SummaryChunker.chunk(dropped, userName, characterName)
-        var accumulated = previousSummary
-        for (chunk in chunks) {
-            val next = summarizeChunk(
-                settings = settings,
-                characterName = characterName,
-                userName = userName,
-                previousSummary = accumulated,
-                chunk = chunk,
-            ) ?: return null
-            accumulated = next
-        }
-        return accumulated.trim().takeIf { it.isNotBlank() }
+        // One LLM call, transcript = newest dropped beats (tail). Faster than multi-chunk
+        // folds and forces the summary to end on what was just before the live thread.
+        val transcript = SummaryText.compactPendingTranscript(
+            dropped = dropped,
+            userName = userName,
+            characterName = characterName,
+            maxChars = SummaryText.SUMMARIZER_TRANSCRIPT_CHARS,
+        )
+        if (transcript.isBlank()) return previousSummary.trim().takeIf { it.isNotBlank() }
+        return summarizeTranscript(
+            settings = settings,
+            previousSummary = previousSummary,
+            transcript = transcript,
+            closingBeat = closingBeat,
+            wordLimit = 220,
+        )
     }
 
-    private suspend fun summarizeChunk(
+    private suspend fun summarizeTranscript(
         settings: AppSettings,
-        characterName: String,
-        userName: String,
         previousSummary: String,
-        chunk: List<MessageEntity>,
+        transcript: String,
+        closingBeat: String = "",
+        wordLimit: Int = 220,
     ): String? {
-        val transcript = chunk.joinToString("\n") { message ->
-            val speaker = if (message.role == MessageRole.USER) userName else characterName
-            "$speaker: ${message.content.trim()}"
+        val prompt = buildSummaryPrompt(previousSummary, transcript, wordLimit, closingBeat)
+        val completion = runSummaryCompletion(settings, prompt, maxTokens = 700) ?: return null
+        if (!completion.finishReason.equals("length", ignoreCase = true)) {
+            return completion.text
         }
+        val condensedPrompt = buildSummaryPrompt(
+            previousSummary,
+            transcript,
+            wordLimit = 140,
+            closingBeat = closingBeat,
+        )
+        val retry = runSummaryCompletion(settings, condensedPrompt, maxTokens = 450) ?: return null
+        if (retry.finishReason.equals("length", ignoreCase = true)) return null
+        return retry.text
+    }
+
+    private fun buildSummaryPrompt(
+        previousSummary: String,
+        transcript: String,
+        wordLimit: Int,
+        closingBeat: String = "",
+    ): String = buildString {
+        appendLine("You are a concise story memory writer for a roleplay chat.")
+        appendLine("Write ONE updated summary in third person, past tense. No quoted dialogue.")
+        appendLine("Brief background first, then end on the CURRENT situation from the NEW events.")
+        appendLine("The FINAL 2–4 sentences MUST say who is where, what just happened, and what is open.")
+        appendLine("Keep names, relationships, locations, promises still relevant now.")
+        appendLine("Aim for at most $wordLimit words. Finish every sentence.")
+        appendLine()
+        // Previous first so NEW events sit closest to generation (less background bias).
+        if (previousSummary.isNotBlank()) {
+            appendLine("Previous summary (background only — shorten or drop stale parts):")
+            appendLine(previousSummary.trim())
+            appendLine()
+        }
+        appendLine("NEW events (newest last — the summary MUST end on the latest of these):")
+        appendLine(transcript.trim())
+        appendLine()
+        if (closingBeat.isNotBlank()) {
+            appendLine("Latest beats to cover in the FINAL sentences (paraphrase, do not quote as chat):")
+            appendLine(closingBeat.trim())
+            appendLine()
+        }
+        appendLine("Updated summary:")
+    }
+
+    private suspend fun condenseSummary(settings: AppSettings, summary: String): String? {
         val prompt = buildString {
-            appendLine("You are a concise story memory writer for a roleplay chat.")
-            appendLine("Merge the previous summary with the new events into one updated summary.")
-            appendLine("Keep names, relationships, locations, promises, and plot-critical facts.")
-            appendLine("Write in third person, past tense, max 400 tokens. No dialogue.")
+            appendLine("Condense this roleplay story summary.")
+            appendLine("Keep names, relationships, locations, promises, and current plot beats.")
+            appendLine("If you must shorten, drop the OLDEST background first.")
+            appendLine("Never drop the CURRENT situation — the last sentences must stay.")
+            appendLine("End on the current situation. Write in third person, past tense.")
+            appendLine("Finish every sentence. No dialogue.")
+            appendLine("Aim for at most 150 words.")
             appendLine()
-            if (previousSummary.isNotBlank()) {
-                appendLine("Previous summary:")
-                appendLine(previousSummary.trim())
-                appendLine()
-            }
-            appendLine("New events to fold in:")
-            appendLine(transcript)
+            appendLine(summary.trim())
             appendLine()
-            appendLine("Updated summary:")
+            appendLine("Condensed summary:")
         }
+        val result = runSummaryCompletion(settings, prompt, maxTokens = 500) ?: return null
+        if (result.finishReason.equals("length", ignoreCase = true)) return null
+        return result.text
+    }
+
+    /**
+     * Shrinks a bloated conversation summary in place so the live recent window
+     * can fit after a sync fold. Keeps the existing cut point.
+     */
+    private suspend fun tryCondenseConversationSummary(
+        conversationId: String,
+        settings: AppSettings,
+    ): Boolean {
+        val conversation = conversationDao.getById(conversationId) ?: return false
+        if (conversation.summary.isBlank()) return false
+        val expectedSummary = conversation.summary
+        val expectedCut = conversation.summaryUpToMessageId
+        val present = SummaryText.extractPresentClosing(conversation.summary)
+        val body = SummaryText.stripPresentClosing(conversation.summary)
+        val condensed = condenseSummary(settings, body) ?: return false
+        val sanitizedBody = SummaryText.sanitize(condensed)
+        val sanitized = if (present.isNullOrBlank()) {
+            sanitizedBody
+        } else {
+            SummaryText.ensurePresentClosing(sanitizedBody, present)
+        }
+        if (sanitized.isBlank() || sanitized.length >= conversation.summary.length) return false
+        val fresh = conversationDao.getById(conversationId) ?: return false
+        if (fresh.summary != expectedSummary || fresh.summaryUpToMessageId != expectedCut) {
+            return false
+        }
+        conversationDao.updateSummary(
+            id = conversationId,
+            summary = sanitized,
+            cutId = expectedCut,
+            updatedAt = System.currentTimeMillis(),
+        )
+        return true
+    }
+
+    private suspend fun runSummaryCompletion(
+        settings: AppSettings,
+        prompt: String,
+        maxTokens: Int,
+    ): com.example.caramelai.data.remote.CompletionResult? {
         val messages = listOf(
             ChatMessageDto(role = MessageRole.USER, content = prompt),
         )
@@ -491,18 +854,18 @@ class ChatRepository(
             topK = 0,
             minP = 0.05f,
             repeatPenalty = 1.0f,
-            maxTokens = 400,
+            maxTokens = maxTokens,
             dryMultiplier = 0f,
             xtcProbability = 0f,
             idSlot = LlmClient.SUMMARY_SLOT,
         )
-        return llmClient.complete(
+        return llmClient.completeDetailed(
             baseUrl = settings.baseUrl,
             apiKey = settings.apiKey,
             model = com.example.caramelai.data.remote.LlmModels.normalizeId(settings.modelId),
             messages = messages,
             params = params,
-        ).getOrNull()?.trim()?.takeIf { it.isNotBlank() }
+        ).getOrNull()?.takeIf { it.text.isNotBlank() }
     }
 
     private suspend fun invalidateSummaryIfNeeded(
@@ -514,8 +877,9 @@ class ChatRepository(
         val cutId = conversation.summaryUpToMessageId ?: return
         val cutIndex = messages.indexOfFirst { it.id == cutId }
         if (cutIndex < 0 || affectedIndex <= cutIndex) {
-            conversationDao.clearSummary(
+            conversationDao.clearSummarySavingPrevious(
                 id = conversationId,
+                previousSummary = conversation.summary,
                 updatedAt = System.currentTimeMillis(),
             )
         }
@@ -546,4 +910,8 @@ class ChatRepository(
         conversationDao.touch(conversationId, System.currentTimeMillis())
     }
 
+    companion object {
+        const val MAX_SUMMARY_CHARS = SummaryText.MAX_SUMMARY_CHARS
+        const val PENDING_TRANSCRIPT_CHARS = SummaryText.PENDING_TRANSCRIPT_CHARS
+    }
 }

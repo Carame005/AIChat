@@ -25,6 +25,7 @@ set "PORT=8081"
 REM auto = offload as many layers as fit in VRAM (99 often fails to 0 on 4 GB GPUs)
 set "NGL=auto"
 REM 12288: ~8k for chat + room for a background summary on a second parallel slot
+REM Raise to 14336 if you have spare VRAM and summaries still fail under a full chat window
 set "CTX=12288"
 REM Two slots: chat (id_slot 0) and summary (id_slot 1); --kv-unified shares the pool
 set "NP=2"

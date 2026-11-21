@@ -31,6 +31,30 @@ object RepetitionDetector {
     fun shouldStrengthenStyle(newReply: String, previousReplies: List<String>): Boolean =
         repetitionScore(newReply, previousReplies) >= STRENGTHEN_THRESHOLD
 
+    /**
+     * True when a Continue draft mostly echoes the previous assistant message
+     * or re-answers the last user turn (quotes / retells their words).
+     */
+    fun isReanswer(
+        draft: String,
+        lastUser: String?,
+        lastAssistant: String?,
+    ): Boolean {
+        if (draft.isBlank()) return false
+        val againstAssistant = lastAssistant
+            ?.takeIf { it.isNotBlank() }
+            ?.let { shouldStrengthenStyle(draft, listOf(it)) }
+            ?: false
+        if (againstAssistant) return true
+        val user = lastUser?.takeIf { it.isNotBlank() } ?: return false
+        if (shouldStrengthenStyle(draft, listOf(user))) return true
+        // Quoting a substantial span of the user's last message is a re-answer signal.
+        val userSnippet = tokenize(user).take(12).joinToString(" ")
+        if (userSnippet.length < 12) return false
+        val draftNorm = tokenize(draft).joinToString(" ")
+        return draftNorm.contains(userSnippet)
+    }
+
     private fun tokenize(text: String): List<String> =
         text.lowercase()
             .replace(Regex("[^\\p{L}\\p{N}\\s*]"), " ")

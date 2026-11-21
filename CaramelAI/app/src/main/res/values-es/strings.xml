@@ -91,7 +91,8 @@
     <string name="chat_history">Historial de chats</string>
     <string name="chat_new_chat">Iniciar nuevo chat</string>
     <string name="chat_specs_copied">Especificaciones copiadas al portapapeles</string>
-    <string name="chat_truncated_hint">Respuesta cortada por el límite de tokens. Pulsa Continuar para seguir.</string>
+    <string name="chat_truncated_hint">La respuesta llegó al límite de tokens y puede haberse quedado corta. Puedes pulsar Continuar para que el bot siga hablando.</string>
+    <string name="chat_continue_repeated">Continuar seguía repitiendo la respuesta anterior. Prueba otra vez o envía un mensaje.</string>
     <string name="chat_branch_failed">No se pudo crear la rama</string>
     <string name="chat_character_missing">Personaje no encontrado</string>
     <string name="chat_with_name">Chat con %1$s</string>
@@ -109,6 +110,9 @@
     <string name="chat_memory_summary_hint">Resumen automático de eventos antiguos. Edítalo si hace falta.</string>
     <string name="chat_memory_pinned_label">Hechos clave</string>
     <string name="chat_memory_pinned_hint">Datos que el bot debe recordar siempre (nombres, lugares, promesas…).</string>
+    <string name="chat_memory_updating">Actualizando memoria…</string>
+    <string name="chat_memory_conflict">La memoria se actualizó en segundo plano. Revisa el texto nuevo y guarda otra vez.</string>
+    <string name="chat_memory_restore_previous">Restaurar resumen anterior</string>
 
     <string name="settings_title">Ajustes</string>
     <string name="settings_connection">Conexión</string>

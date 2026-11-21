@@ -5,7 +5,8 @@ import com.example.caramelai.data.db.MessageRole
 
 /** Splits dropped history into character-budget chunks without splitting a message. */
 object SummaryChunker {
-    const val DEFAULT_MAX_CHARS = 5000
+    /** Large enough that typical folds fit in one LLM call (faster, ends on latest beats). */
+    const val DEFAULT_MAX_CHARS = 6000
 
     fun chunk(
         dropped: List<MessageEntity>,

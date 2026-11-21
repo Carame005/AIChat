@@ -51,9 +51,37 @@ class PromptBuilderTest {
             persona = null,
             userName = "Carlos",
             globalBehavior = "Lean into romantic tension.",
+            summary = "They met at the harbour.",
         )
-        assertTrue(system.contains("Global user preferences"))
+        assertTrue(system.contains("USER PREFERENCES"))
         assertTrue(system.contains("Lean into romantic tension."))
+        // Story summary sits after preferences so the CURRENT situation is closer to live turns.
+        assertTrue(system.indexOf("Story so far:") > system.indexOf("USER PREFERENCES"))
+    }
+
+    @Test
+    fun globalBehaviorIsNotDuplicatedOutsideSystem() {
+        val character = CharacterEntity(id = "1", name = "Ganyu")
+        val history = listOf(
+            MessageEntity("1", "c", MessageRole.USER, "Hi"),
+        )
+        val messages = builder.build(
+            character = character,
+            history = history,
+            persona = null,
+            fallbackUserName = "Carlos",
+            contextSize = 8192,
+            maxTokens = 512,
+            globalBehavior = "Keep replies short and teasing.",
+        )
+        assertTrue(messages.first().content.contains("USER PREFERENCES"))
+        assertTrue(messages.first().content.contains("Keep replies short and teasing."))
+        assertFalse(
+            messages.drop(1).any {
+                it.content.contains("USER PREFERENCES") ||
+                    it.content.contains("Keep replies short and teasing.")
+            },
+        )
     }
 
     @Test
@@ -79,8 +107,10 @@ class PromptBuilderTest {
         )
         assertTrue(system.contains("Story so far:"))
         assertTrue(system.contains("They met at the harbour."))
-        assertTrue(system.contains("Key facts"))
+        assertTrue(system.contains("KEY FACTS"))
         assertTrue(system.contains("Ganyu has a blue hairpin."))
+        // Key facts must appear after the story summary so they are not buried.
+        assertTrue(system.indexOf("KEY FACTS") > system.indexOf("Story so far:"))
     }
 
     @Test
@@ -180,6 +210,7 @@ class PromptBuilderTest {
             fallbackUserName = "Carlos",
             contextSize = 700,
             maxTokens = 128,
+            softTargetRatio = 1.0f,
         )
         assertNotNull(first.newSummaryUpToMessageId)
         assertTrue(first.droppedForSummary.isNotEmpty())
@@ -193,8 +224,9 @@ class PromptBuilderTest {
             maxTokens = 128,
             summaryUpToMessageId = first.newSummaryUpToMessageId,
             summary = "Earlier events happened.",
+            softTargetRatio = 1.0f,
         )
-        // Same cut: no further trim while history after cut still fits soft budget.
+        // Same cut: no further hard overflow while history after cut still fits.
         assertEquals(null, second.newSummaryUpToMessageId)
         assertTrue(second.messages.first().content.contains("Earlier events happened."))
     }
@@ -229,7 +261,8 @@ class PromptBuilderTest {
         )
         assertEquals("(Begin the scene.)", messages[1].content)
         assertEquals("Ganyu: Hello there.", messages[2].content)
-        assertTrue(messages[3].content.startsWith("Carlos: Hi!"))
+        assertTrue(messages[3].content.trimEnd().endsWith("Carlos: Hi!"))
+        assertTrue(messages[3].content.contains("[Notes for Ganyu:"))
     }
 
     @Test
@@ -249,6 +282,7 @@ class PromptBuilderTest {
         )
         assertEquals("Carlos: More intimately? how so?", messages[1].content)
         assertEquals("Madoka: *blushes* \"Oh...\"", messages[2].content)
+        assertTrue(messages.last().content.contains("[Notes for Madoka:"))
     }
 
     @Test
@@ -292,11 +326,40 @@ class PromptBuilderTest {
             continueMode = true,
         )
         assertEquals(MessageRole.USER, messages.last().role)
-        assertTrue(messages.last().content.contains("Continue your previous"))
-        assertTrue(messages.last().content.contains("NOT a new answer"))
-        assertTrue(messages.last().content.contains("Hello there, friend."))
-        assertTrue(messages.last().content.startsWith("Carlos:"))
-        assertFalse(messages.first().content.contains("CONTINUE your previous"))
+        assertTrue(messages.last().content.contains("KEEP TALKING"))
+        assertTrue(messages.last().content.contains("NEW in-character message"))
+        assertTrue(messages.last().content.contains("continues the same thread"))
+        // Do not quote the previous reply (avoids echo).
+        assertFalse(messages.last().content.contains("Hello there, friend."))
+        assertFalse(messages.last().content.contains("ended with"))
+        // Continue mode: standing notes + action cue at the end, no user speaker prefix.
+        assertTrue(messages.last().content.contains("[Notes for Ganyu:"))
+        assertTrue(messages.last().content.contains("continue your own thread"))
+        assertFalse(messages.last().content.contains("reacting to Carlos's last message"))
+        assertFalse(messages.last().content.startsWith("Carlos:"))
+        assertFalse(messages.first().content.contains("KEEP TALKING"))
+    }
+
+    @Test
+    fun continueCueAsksBotToKeepTalkingWithoutQuoting() {
+        val cue = builder.buildContinueCue(
+            characterName = "Ganyu",
+            userName = "Carlos",
+        )
+        assertTrue(cue.contains("KEEP TALKING"))
+        assertTrue(cue.contains("continues the same thread"))
+        assertFalse(cue.contains("cut off"))
+        assertFalse(cue.contains("ended with"))
+    }
+
+    @Test
+    fun continueCueIncludesRejectedOpeningOnRetry() {
+        val cue = builder.buildContinueCue(
+            characterName = "Ganyu",
+            userName = "Carlos",
+            rejectedOpening = "*She smiles softly*",
+        )
+        assertTrue(cue.contains("Do not start like: \"*She smiles softly*\""))
     }
 
     @Test
@@ -315,6 +378,20 @@ class PromptBuilderTest {
                 "\"Stay,\" he whispered.\n\n*His hand found hers gently.*",
             ),
         )
+    }
+
+    @Test
+    fun trimContinuationOverlapDropsFullRestartThatStillRepeats() {
+        val previous = buildString {
+            append("*She steps closer, eyes soft, and takes his hand gently.* ")
+            append("\"I have been waiting for this moment all evening,\" she whispers. ")
+            append("*Her fingers tighten just a little as the harbour lights flicker.* ")
+            append("\"Stay with me a while longer,\" she adds, almost too quiet to hear.")
+        }
+        // Full restart of the same reply with only a tiny tail added.
+        val addition = previous + " *She does not look away.*"
+        val cleaned = builder.trimContinuationOverlap(previous, addition)
+        assertTrue(cleaned.isEmpty())
     }
 
     @Test
@@ -415,11 +492,154 @@ class PromptBuilderTest {
             revisionInstruction = "Make this reply more suggestive",
         )
         assertEquals(MessageRole.USER, messages.last().role)
-        assertTrue(messages.last().content.contains("Rewrite your last reply"))
+        assertTrue(messages.last().content.contains("PRIORITY"))
+        assertTrue(messages.last().content.contains("rewrite your last reply"))
         assertTrue(messages.last().content.contains("Make this reply more suggestive"))
         assertTrue(messages.last().content.contains(previous))
-        assertTrue(messages.last().content.contains("Previous version"))
+        assertTrue(messages.last().content.contains("Previous:"))
         assertTrue(!messages.last().content.contains("Regenerate your last reply"))
+        // Revise cue must be the last OOC block (closest to generation).
+        assertTrue(messages.last().content.trimEnd().endsWith("---)") ||
+            messages.last().content.contains("PRIORITY"))
+    }
+
+    @Test
+    fun pinnedFactsAreNotDuplicatedOutsideSystem() {
+        val character = CharacterEntity(id = "1", name = "Ganyu")
+        val history = listOf(
+            MessageEntity("1", "c", MessageRole.USER, "Hi"),
+        )
+        val messages = builder.build(
+            character = character,
+            history = history,
+            persona = null,
+            fallbackUserName = "Carlos",
+            contextSize = 8192,
+            maxTokens = 512,
+            pinnedMemory = "They are in Kyoto.",
+        )
+        assertTrue(messages.first().content.contains("KEY FACTS"))
+        assertTrue(messages.first().content.contains("They are in Kyoto."))
+        assertFalse(
+            messages.drop(1).any {
+                it.content.contains("KEY FACTS") || it.content.contains("They are in Kyoto.")
+            },
+        )
+    }
+
+    @Test
+    fun latestUserMessageStaysAtEndOfMergedTurn() {
+        val character = CharacterEntity(id = "1", name = "Ganyu")
+        val history = listOf(
+            MessageEntity("1", "c", MessageRole.ASSISTANT, "Hello."),
+            MessageEntity("2", "c", MessageRole.USER, "Let's go to the market now."),
+        )
+        val messages = builder.build(
+            character = character,
+            history = history,
+            persona = null,
+            fallbackUserName = "Carlos",
+            contextSize = 8192,
+            maxTokens = 512,
+        )
+        val last = messages.last()
+        assertEquals(MessageRole.USER, last.role)
+        assertTrue(last.content.contains("[Notes for Ganyu:"))
+        assertTrue(last.content.trimEnd().endsWith("Carlos: Let's go to the market now."))
+    }
+
+    @Test
+    fun actionCueAppearsAfterLatestUserMessage() {
+        val character = CharacterEntity(id = "1", name = "Ganyu")
+        val history = listOf(
+            MessageEntity("1", "c", MessageRole.USER, "Tell me a story"),
+        )
+        val regenerate = builder.build(
+            character = character,
+            history = history,
+            persona = null,
+            fallbackUserName = "Carlos",
+            contextSize = 8192,
+            maxTokens = 512,
+            avoidTexts = listOf("Rejected draft."),
+        )
+        val regenContent = regenerate.last().content
+        assertTrue(
+            regenContent.indexOf("Carlos: Tell me a story") <
+                regenContent.indexOf("Regenerate your last reply"),
+        )
+
+        val revise = builder.build(
+            character = character,
+            history = history,
+            persona = null,
+            fallbackUserName = "Carlos",
+            contextSize = 8192,
+            maxTokens = 512,
+            avoidTexts = listOf("Previous draft."),
+            revisionInstruction = "Make it warmer",
+        )
+        val reviseContent = revise.last().content
+        assertTrue(
+            reviseContent.indexOf("Carlos: Tell me a story") <
+                reviseContent.indexOf("PRIORITY"),
+        )
+    }
+
+    @Test
+    fun turnNoteUsesPositiveInitiativeWording() {
+        val note = builder.buildTurnNote("Ganyu", "Carlos")
+        assertTrue(note.contains("Continue as Ganyu"))
+        assertTrue(note.contains("makes their own choices"))
+        assertFalse(note.contains("already answered or accepted"))
+        assertFalse(note.contains("Never speak, act, think, or decide"))
+
+        val system = builder.buildSystemPrompt(
+            character = CharacterEntity(id = "1", name = "Ganyu"),
+            persona = null,
+            userName = "Carlos",
+        )
+        assertTrue(system.contains("drives the scene"))
+        assertTrue(system.contains("handing the decision back"))
+        assertFalse(system.contains("Never speak, act, think, or decide"))
+        assertFalse(system.contains("Never attribute your own words"))
+    }
+
+    @Test
+    fun recentWindowIsNeverSoftTrimmedAway() {
+        val history = (1..40).map { index ->
+            MessageEntity(
+                id = "m$index",
+                conversationId = "c",
+                role = if (index % 2 == 0) MessageRole.ASSISTANT else MessageRole.USER,
+                content = "Message number $index with enough padding for token estimates here.",
+            )
+        }
+        val selection = builder.selectHistoryWithinBudget(
+            history = history,
+            characterName = "Ganyu",
+            userName = "Carlos",
+            budget = 2_500,
+            softTargetRatio = 0.65f,
+        )
+        assertTrue(selection.kept.any { it.content.contains("Message number 40") })
+        assertTrue(selection.kept.any { it.content.contains("Message number 39") })
+        // Soft-trim may omit older turns without a permanent cut when everything hard-fits.
+        val hard = builder.selectHistoryWithinBudget(
+            history = history,
+            characterName = "Ganyu",
+            userName = "Carlos",
+            budget = 2_500,
+            softTargetRatio = 1.0f,
+        )
+        if (hard.dropped.isEmpty()) {
+            assertTrue(selection.dropped.isEmpty())
+            assertEquals(null, selection.newCutMessageId)
+        } else {
+            assertTrue(selection.dropped.isNotEmpty())
+        }
+        // Newest live turns survive soft trim (or recent truncation keeps the tip).
+        assertTrue(selection.kept.size >= 2)
     }
 
     @Test

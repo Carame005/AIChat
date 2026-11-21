@@ -69,6 +69,11 @@ sealed interface ChatStreamEvent {
     data class Done(val finishReason: String?) : ChatStreamEvent
 }
 
+data class CompletionResult(
+    val text: String,
+    val finishReason: String?,
+)
+
 class LlmClient(
     private val json: Json = Json {
         ignoreUnknownKeys = true
@@ -138,7 +143,16 @@ class LlmClient(
         model: String,
         messages: List<ChatMessageDto>,
         params: GenerationParams,
-    ): Result<String> {
+    ): Result<String> = completeDetailed(baseUrl, apiKey, model, messages, params)
+        .map { it.text }
+
+    suspend fun completeDetailed(
+        baseUrl: String,
+        apiKey: String,
+        model: String,
+        messages: List<ChatMessageDto>,
+        params: GenerationParams,
+    ): Result<CompletionResult> {
         val base = normalizeBaseUrl(baseUrl).getOrElse { return Result.failure(it) }
         val requestBody = params.toRequest(model = model, messages = messages, stream = false)
         val payload = json.encodeToString(ChatCompletionRequest.serializer(), requestBody)
@@ -170,14 +184,22 @@ class LlmClient(
                             return
                         }
                         runCatching {
-                            json.decodeFromString(ChatCompletionResponse.serializer(), body)
-                                .choices.firstOrNull()?.message?.content?.trim().orEmpty()
+                            val parsed = json.decodeFromString(
+                                ChatCompletionResponse.serializer(),
+                                body,
+                            )
+                            val choice = parsed.choices.firstOrNull()
+                            val text = choice?.message?.content?.trim().orEmpty()
+                            CompletionResult(
+                                text = text,
+                                finishReason = choice?.finishReason,
+                            )
                         }.fold(
-                            onSuccess = { text ->
-                                if (text.isBlank()) {
+                            onSuccess = { result ->
+                                if (result.text.isBlank()) {
                                     cont.resume(Result.failure(IOException("Empty completion")))
                                 } else {
-                                    cont.resume(Result.success(text))
+                                    cont.resume(Result.success(result))
                                 }
                             },
                             onFailure = { err ->

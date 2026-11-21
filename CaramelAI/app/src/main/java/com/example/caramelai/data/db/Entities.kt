@@ -58,6 +58,8 @@ data class ConversationEntity(
     val summaryUpToMessageId: String? = null,
     /** User-editable key facts always injected into the system prompt. */
     val pinnedMemory: String = "",
+    /** Last summary cleared by edit/delete before the cut (restore safety net). */
+    val previousSummary: String = "",
 )
 
 @Entity(

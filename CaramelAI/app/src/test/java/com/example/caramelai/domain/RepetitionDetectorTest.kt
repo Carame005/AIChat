@@ -29,4 +29,45 @@ class RepetitionDetectorTest {
         assertTrue(RepetitionDetector.repetitionScore("hello", emptyList()) == 0.0)
         assertFalse(RepetitionDetector.shouldStrengthenStyle("hello", emptyList()))
     }
+
+    @Test
+    fun isReanswerDetectsEchoOfPreviousAssistant() {
+        val previous = "*She smiles softly at him* \"I missed you so much tonight.\""
+        val draft = "*She smiles softly at him* \"I missed you so much this evening.\""
+        assertTrue(
+            RepetitionDetector.isReanswer(
+                draft = draft,
+                lastUser = "What are you thinking?",
+                lastAssistant = previous,
+            ),
+        )
+    }
+
+    @Test
+    fun isReanswerDetectsQuotingUserMessage() {
+        val user = "Please tell me about the harbour festival and why you left early."
+        val draft = buildString {
+            append("*She nods.* You asked me to ")
+            append("please tell me about the harbour festival and why you left early, ")
+            append("so here is what happened.")
+        }
+        assertTrue(
+            RepetitionDetector.isReanswer(
+                draft = draft,
+                lastUser = user,
+                lastAssistant = "*She looks away.* \"Later.\"",
+            ),
+        )
+    }
+
+    @Test
+    fun isReanswerIsFalseForFreshContinuation() {
+        assertFalse(
+            RepetitionDetector.isReanswer(
+                draft = "*She walks to the balcony and breathes in the night air.* \"Come with me.\"",
+                lastUser = "What should we do next?",
+                lastAssistant = "*She laughs softly.* \"You always ask that.\"",
+            ),
+        )
+    }
 }

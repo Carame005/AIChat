@@ -16,6 +16,7 @@ import com.example.caramelai.data.settings.SettingsRepository
 import com.example.caramelai.domain.CharacterRepository
 import com.example.caramelai.domain.ChatRepository
 import com.example.caramelai.domain.PersonaRepository
+import com.example.caramelai.domain.PromptBuilder
 import com.example.caramelai.domain.RepetitionDetector
 import com.example.caramelai.domain.SummaryCoordinator
 import kotlinx.coroutines.Job
@@ -36,6 +37,8 @@ data class ChatUiState(
     val draft: String = "",
     val streamingText: String = "",
     val isGenerating: Boolean = false,
+    /** True while a pre-reply summary fold is running. */
+    val isSummarizing: Boolean = false,
     val editingMessageId: String? = null,
     val editingText: String = "",
     /** When set, that assistant message is being regenerated (hidden while streaming). */
@@ -45,6 +48,14 @@ data class ChatUiState(
     val showMemoryDialog: Boolean = false,
     val memorySummaryDraft: String = "",
     val memoryPinnedDraft: String = "",
+    /** Snapshot of summary when the memory dialog opened; used to avoid clobbering. */
+    val memorySummaryOriginal: String = "",
+    /** Snapshot of summary cut when the memory dialog opened. */
+    val memoryCutOriginal: String? = null,
+    /** True when a background fold changed memory while the dialog was open. */
+    val memoryConflict: Boolean = false,
+    /** Saved summary before the last automatic clear (edit/delete before cut). */
+    val memoryPreviousSummary: String = "",
 )
 
 class ChatViewModel(
@@ -135,10 +146,11 @@ class ChatViewModel(
                     appendToMessageId = null,
                     alreadyBegan = true,
                 )
-                // Truncated / "keep going": append onto the last assistant bubble.
+                // Skip user turn: new assistant message that continues the scene.
                 last.role == MessageRole.ASSISTANT -> generate(
                     continueMode = true,
-                    appendToMessageId = last.id,
+                    appendToMessageId = null,
+                    previousForContinue = last.content,
                     alreadyBegan = true,
                 )
                 else -> generate(
@@ -155,10 +167,12 @@ class ChatViewModel(
         val partial = _uiState.value.streamingText
         val appendToId = pendingAppendToMessageId
         val replaceId = pendingReplaceMessageId
+        val continuePrevious = pendingContinuePrevious
         generationJob?.cancel()
         generationJob = null
         pendingAppendToMessageId = null
         pendingReplaceMessageId = null
+        pendingContinuePrevious = null
         viewModelScope.launch {
             if (partial.isNotBlank()) {
                 when {
@@ -166,6 +180,12 @@ class ChatViewModel(
                         chatRepository.appendToAssistantMessage(conversationId, appendToId, partial)
                     replaceId != null ->
                         chatRepository.addAssistantVariant(conversationId, replaceId, partial)
+                    continuePrevious != null ->
+                        chatRepository.saveContinuationMessage(
+                            conversationId,
+                            continuePrevious,
+                            partial,
+                        )
                     else ->
                         chatRepository.saveAssistantMessage(conversationId, partial)
                 }
@@ -173,6 +193,7 @@ class ChatViewModel(
             _uiState.update {
                 it.copy(
                     isGenerating = false,
+                    isSummarizing = false,
                     streamingText = "",
                     regeneratingMessageId = null,
                 )
@@ -362,21 +383,34 @@ class ChatViewModel(
 
     private var pendingAppendToMessageId: String? = null
     private var pendingReplaceMessageId: String? = null
+    private var pendingContinuePrevious: String? = null
     private var strengthenNextStyleNote: Boolean = false
+
+    val isMemoryBusy: StateFlow<Boolean> =
+        summaryCoordinator.active
+            .combine(uiState) { active, state ->
+                conversationId in active || state.isSummarizing
+            }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     fun beginMemoryEdit() {
         val conv = conversation.value
+        val summary = conv?.summary.orEmpty()
         _uiState.update {
             it.copy(
                 showMemoryDialog = true,
-                memorySummaryDraft = conv?.summary.orEmpty(),
+                memorySummaryDraft = summary,
+                memorySummaryOriginal = summary,
+                memoryCutOriginal = conv?.summaryUpToMessageId,
                 memoryPinnedDraft = conv?.pinnedMemory.orEmpty(),
+                memoryConflict = false,
+                memoryPreviousSummary = conv?.previousSummary.orEmpty(),
             )
         }
     }
 
     fun updateMemorySummaryDraft(value: String) =
-        _uiState.update { it.copy(memorySummaryDraft = value) }
+        _uiState.update { it.copy(memorySummaryDraft = value, memoryConflict = false) }
 
     fun updateMemoryPinnedDraft(value: String) =
         _uiState.update { it.copy(memoryPinnedDraft = value) }
@@ -385,16 +419,61 @@ class ChatViewModel(
         it.copy(
             showMemoryDialog = false,
             memorySummaryDraft = "",
+            memorySummaryOriginal = "",
+            memoryCutOriginal = null,
             memoryPinnedDraft = "",
+            memoryConflict = false,
+            memoryPreviousSummary = "",
         )
+    }
+
+    fun restorePreviousSummary() {
+        val previous = _uiState.value.memoryPreviousSummary
+        if (previous.isBlank()) return
+        _uiState.update {
+            it.copy(
+                memorySummaryDraft = previous,
+                memoryConflict = false,
+            )
+        }
     }
 
     fun commitMemoryEdit() {
         val summary = _uiState.value.memorySummaryDraft
+        val original = _uiState.value.memorySummaryOriginal
+        val expectedCut = _uiState.value.memoryCutOriginal
         val pinned = _uiState.value.memoryPinnedDraft
         viewModelScope.launch {
-            chatRepository.updateConversationMemory(conversationId, summary, pinned)
-            cancelMemoryEdit()
+            summaryCoordinator.withConversationLock(conversationId) {
+                if (summary == original) {
+                    chatRepository.updatePinnedMemory(conversationId, pinned)
+                    cancelMemoryEdit()
+                } else {
+                    when (
+                        val result = chatRepository.updateConversationMemory(
+                            conversationId = conversationId,
+                            summary = summary,
+                            pinnedMemory = pinned,
+                            expectedSummary = original,
+                            expectedCut = expectedCut,
+                        )
+                    ) {
+                        is ChatRepository.MemoryUpdateResult.Updated -> cancelMemoryEdit()
+                        is ChatRepository.MemoryUpdateResult.Conflict -> {
+                            _uiState.update {
+                                it.copy(
+                                    memorySummaryDraft = result.current.summary,
+                                    memorySummaryOriginal = result.current.summary,
+                                    memoryCutOriginal = result.current.summaryUpToMessageId,
+                                    memoryPinnedDraft = result.current.pinnedMemory,
+                                    memoryPreviousSummary = result.current.previousSummary,
+                                    memoryConflict = true,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -419,6 +498,7 @@ class ChatViewModel(
         _uiState.update {
             it.copy(
                 isGenerating = false,
+                isSummarizing = false,
                 streamingText = "",
                 regeneratingMessageId = null,
             )
@@ -431,28 +511,50 @@ class ChatViewModel(
         replaceMessageId: String? = null,
         avoidTexts: List<String> = emptyList(),
         revisionInstruction: String? = null,
+        previousForContinue: String = "",
+        continueRejectedOpening: String? = null,
         alreadyBegan: Boolean = false,
+        strengthenStyleNote: Boolean? = null,
+        autoRetried: Boolean = false,
     ) {
         if (!alreadyBegan && !tryBeginGeneration()) return
         generationJob?.cancel()
         pendingAppendToMessageId = appendToMessageId
         pendingReplaceMessageId = replaceMessageId
-        val useStrongStyle = strengthenNextStyleNote
-        strengthenNextStyleNote = false
+        pendingContinuePrevious = if (continueMode && previousForContinue.isNotBlank()) {
+            previousForContinue
+        } else {
+            null
+        }
+        val useStrongStyle = strengthenStyleNote ?: run {
+            val flag = strengthenNextStyleNote
+            strengthenNextStyleNote = false
+            flag
+        }
         generationJob = viewModelScope.launch {
             _uiState.update {
                 it.copy(
                     isGenerating = true,
+                    isSummarizing = false,
                     streamingText = "",
                     regeneratingMessageId = replaceMessageId,
                 )
             }
             try {
                 val settings = settingsRepository.settings.first()
-                val priorAssistant = messages.value
+                val snapshot = chatRepository.getMessagesSnapshot(conversationId)
+                val priorAssistant = snapshot
                     .filter { it.role == MessageRole.ASSISTANT && it.id != replaceMessageId }
                     .takeLast(4)
                     .map { it.content }
+                val lastUser = snapshot.lastOrNull { it.role == MessageRole.USER }?.content
+                val continuePrevious = if (continueMode) {
+                    previousForContinue.ifBlank { priorAssistant.lastOrNull().orEmpty() }
+                } else {
+                    ""
+                }
+                val effectiveCut = summaryCoordinator.effectiveCut(conversationId, snapshot)
+                val inFlightDropped = summaryCoordinator.pendingDropped(conversationId)
                 val plan = chatRepository.prepareStreamReply(
                     conversationId = conversationId,
                     settings = settings,
@@ -462,7 +564,49 @@ class ChatViewModel(
                     avoidTexts = avoidTexts,
                     revisionInstruction = revisionInstruction,
                     strengthenStyleNote = useStrongStyle,
+                    continueRejectedOpening = continueRejectedOpening,
+                    effectiveSummaryCut = effectiveCut,
+                    inFlightDropped = inFlightDropped,
+                    fold = { cid, foldSettings, charId, cutId, dropped ->
+                        summaryCoordinator.foldNow(cid, foldSettings, charId, cutId, dropped)
+                    },
+                    onSummarizing = { summarizing ->
+                        _uiState.update { it.copy(isSummarizing = summarizing) }
+                    },
                 )
+                // Register shadow cut + coalesce ASAP (before streaming) so a follow-up
+                // message cannot rediscover the same overflow while the fold LLM runs.
+                // Regenerating / revising must never advance the cut.
+                // Skip tiny overflows — prepareStreamReply already cleared those from the plan.
+                if (replaceMessageId == null) {
+                    val promptBuilder = PromptBuilder()
+                    val characterName = character.value?.name ?: "Character"
+                    val userName = activePersona.value?.name?.takeIf { it.isNotBlank() }
+                        ?: settings.userName
+                    val pending = promptBuilder.pendingSummaryWork(
+                        history = snapshot,
+                        currentCut = effectiveCut,
+                        proposedCut = plan.newSummaryUpToMessageId,
+                        dropped = plan.droppedForSummary,
+                    )
+                    if (pending.hasWork &&
+                        promptBuilder.shouldAdvanceSummaryCut(
+                            history = snapshot,
+                            currentCut = effectiveCut,
+                            dropped = pending.dropped,
+                            userName = userName,
+                            characterName = characterName,
+                        )
+                    ) {
+                        summaryCoordinator.schedule(
+                            conversationId = conversationId,
+                            settings = settings,
+                            characterId = characterId,
+                            cutId = pending.cutId,
+                            dropped = pending.dropped,
+                        )
+                    }
+                }
                 val buffer = StringBuilder()
                 var finishReason: String? = null
                 var lastUiAt = 0L
@@ -485,38 +629,61 @@ class ChatViewModel(
                 if (buffer.isNotEmpty()) {
                     _uiState.update { it.copy(streamingText = buffer.toString()) }
                 }
-                val finalText = buffer.toString()
+                val finalText = buffer.toString().trim()
                 if (finalText.isNotBlank()) {
-                    when {
-                        appendToMessageId != null ->
-                            chatRepository.appendToAssistantMessage(
-                                conversationId,
-                                appendToMessageId,
-                                finalText,
-                            )
-                        replaceMessageId != null ->
-                            chatRepository.addAssistantVariant(
-                                conversationId,
-                                replaceMessageId,
-                                finalText.trim(),
-                            )
-                        else ->
-                            chatRepository.saveAssistantMessage(conversationId, finalText.trim())
+                    val continueEcho = continueMode &&
+                        RepetitionDetector.isReanswer(
+                            draft = finalText,
+                            lastUser = lastUser,
+                            lastAssistant = continuePrevious,
+                        )
+                    if (continueEcho && !autoRetried) {
+                        // Discard and retry once with a stronger anti-repetition note.
+                        generate(
+                            continueMode = true,
+                            appendToMessageId = null,
+                            previousForContinue = continuePrevious,
+                            continueRejectedOpening = PromptBuilder().openingPhrase(finalText),
+                            alreadyBegan = true,
+                            strengthenStyleNote = true,
+                            autoRetried = true,
+                        )
+                        return@launch
                     }
-                    if (!continueMode &&
-                        RepetitionDetector.shouldStrengthenStyle(finalText.trim(), priorAssistant)
-                    ) {
-                        strengthenNextStyleNote = true
+                    if (continueEcho && autoRetried) {
+                        _events.emit(
+                            ChatEvent.Error(
+                                getApplication<Application>()
+                                    .getString(R.string.chat_continue_repeated),
+                            ),
+                        )
+                    } else {
+                        when {
+                            appendToMessageId != null ->
+                                chatRepository.appendToAssistantMessage(
+                                    conversationId,
+                                    appendToMessageId,
+                                    finalText,
+                                )
+                            replaceMessageId != null ->
+                                chatRepository.addAssistantVariant(
+                                    conversationId,
+                                    replaceMessageId,
+                                    finalText,
+                                )
+                            continueMode && continuePrevious.isNotBlank() ->
+                                chatRepository.saveContinuationMessage(
+                                    conversationId,
+                                    continuePrevious,
+                                    finalText,
+                                )
+                            else ->
+                                chatRepository.saveAssistantMessage(conversationId, finalText)
+                        }
+                        if (RepetitionDetector.shouldStrengthenStyle(finalText, priorAssistant)) {
+                            strengthenNextStyleNote = true
+                        }
                     }
-                }
-                if (plan.droppedForSummary.isNotEmpty() || plan.newSummaryUpToMessageId != null) {
-                    summaryCoordinator.schedule(
-                        conversationId = conversationId,
-                        settings = settings,
-                        characterId = characterId,
-                        cutId = plan.newSummaryUpToMessageId,
-                        dropped = plan.droppedForSummary,
-                    )
                 }
                 if (finishReason.equals("length", ignoreCase = true)) {
                     _events.emit(
@@ -533,9 +700,11 @@ class ChatViewModel(
                 if (generationJob === this.coroutineContext[Job]) {
                     pendingAppendToMessageId = null
                     pendingReplaceMessageId = null
+                    pendingContinuePrevious = null
                     _uiState.update {
                         it.copy(
                             isGenerating = false,
+                            isSummarizing = false,
                             streamingText = "",
                             regeneratingMessageId = null,
                         )

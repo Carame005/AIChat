@@ -113,6 +113,49 @@ interface ConversationDao {
     @Query(
         """
         UPDATE conversations
+        SET summary = :summary,
+            summaryUpToMessageId = :cutId,
+            pinnedMemory = :pinned,
+            updatedAt = :updatedAt
+        WHERE id = :id
+        """,
+    )
+    suspend fun updateMemoryAndCut(
+        id: String,
+        summary: String,
+        cutId: String?,
+        pinned: String,
+        updatedAt: Long,
+    )
+
+    @Query(
+        """
+        UPDATE conversations
+        SET pinnedMemory = :pinned, updatedAt = :updatedAt
+        WHERE id = :id
+        """,
+    )
+    suspend fun updatePinned(id: String, pinned: String, updatedAt: Long)
+
+    @Query(
+        """
+        UPDATE conversations
+        SET previousSummary = :previousSummary,
+            summary = '',
+            summaryUpToMessageId = NULL,
+            updatedAt = :updatedAt
+        WHERE id = :id
+        """,
+    )
+    suspend fun clearSummarySavingPrevious(
+        id: String,
+        previousSummary: String,
+        updatedAt: Long,
+    )
+
+    @Query(
+        """
+        UPDATE conversations
         SET personaId = :personaId, updatedAt = :updatedAt
         WHERE id = :id
         """,

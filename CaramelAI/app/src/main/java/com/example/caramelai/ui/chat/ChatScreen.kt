@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -100,6 +101,7 @@ fun ChatScreen(
     val character by viewModel.character.collectAsStateWithLifecycle()
     val messages by viewModel.messages.collectAsStateWithLifecycle()
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val isMemoryBusy by viewModel.isMemoryBusy.collectAsStateWithLifecycle()
     val activePersona by viewModel.activePersona.collectAsStateWithLifecycle()
     val personas by viewModel.personas.collectAsStateWithLifecycle()
     val conversations by viewModel.conversations.collectAsStateWithLifecycle()
@@ -257,7 +259,16 @@ fun ChatScreen(
                                 size = 28.dp,
                                 rounded = false,
                             )
-                            TypingDots()
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                TypingDots()
+                                if (uiState.isSummarizing || isMemoryBusy) {
+                                    Text(
+                                        text = stringResource(R.string.chat_memory_updating),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -529,8 +540,11 @@ fun ChatScreen(
                 OutlinedTextField(
                     value = uiState.editingText,
                     onValueChange = viewModel::updateEditingText,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 96.dp, max = 240.dp),
                     minLines = 4,
+                    maxLines = 10,
                 )
             },
             confirmButton = {
@@ -554,8 +568,11 @@ fun ChatScreen(
                 OutlinedTextField(
                     value = uiState.revisePromptDraft,
                     onValueChange = viewModel::updateRevisePromptDraft,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 96.dp, max = 240.dp),
                     minLines = 3,
+                    maxLines = 10,
                     placeholder = {
                         Text(stringResource(R.string.chat_revise_prompt_hint))
                     },
@@ -582,7 +599,27 @@ fun ChatScreen(
             onDismissRequest = viewModel::cancelMemoryEdit,
             title = { Text(stringResource(R.string.chat_memory_title)) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 420.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    if (isMemoryBusy) {
+                        Text(
+                            text = stringResource(R.string.chat_memory_updating),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                    if (uiState.memoryConflict) {
+                        Text(
+                            text = stringResource(R.string.chat_memory_conflict),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
                     Text(
                         text = stringResource(R.string.chat_memory_summary_label),
                         style = MaterialTheme.typography.labelLarge,
@@ -590,12 +627,24 @@ fun ChatScreen(
                     OutlinedTextField(
                         value = uiState.memorySummaryDraft,
                         onValueChange = viewModel::updateMemorySummaryDraft,
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 96.dp, max = 160.dp),
                         minLines = 3,
+                        maxLines = 8,
+                        enabled = !isMemoryBusy,
                         placeholder = {
                             Text(stringResource(R.string.chat_memory_summary_hint))
                         },
                     )
+                    if (uiState.memoryPreviousSummary.isNotBlank()) {
+                        TextButton(
+                            onClick = viewModel::restorePreviousSummary,
+                            enabled = !isMemoryBusy,
+                        ) {
+                            Text(stringResource(R.string.chat_memory_restore_previous))
+                        }
+                    }
                     Text(
                         text = stringResource(R.string.chat_memory_pinned_label),
                         style = MaterialTheme.typography.labelLarge,
@@ -603,8 +652,12 @@ fun ChatScreen(
                     OutlinedTextField(
                         value = uiState.memoryPinnedDraft,
                         onValueChange = viewModel::updateMemoryPinnedDraft,
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 96.dp, max = 160.dp),
                         minLines = 3,
+                        maxLines = 8,
+                        enabled = !isMemoryBusy,
                         placeholder = {
                             Text(stringResource(R.string.chat_memory_pinned_hint))
                         },
@@ -612,7 +665,10 @@ fun ChatScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = viewModel::commitMemoryEdit) {
+                TextButton(
+                    onClick = viewModel::commitMemoryEdit,
+                    enabled = !isMemoryBusy,
+                ) {
                     Text(stringResource(R.string.action_save))
                 }
             },

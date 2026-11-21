@@ -18,9 +18,13 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -34,9 +38,12 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusEvent
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -52,6 +59,7 @@ import coil.compose.AsyncImage
 import com.example.caramelai.R
 import com.example.caramelai.ui.theme.LocalCaramelColors
 import kotlin.math.roundToInt
+import kotlinx.coroutines.launch
 
 private val CardShape = RoundedCornerShape(18.dp)
 private val FieldShape = RoundedCornerShape(16.dp)
@@ -196,6 +204,7 @@ fun Avatar(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun CaramelTextField(
     value: String,
@@ -204,14 +213,25 @@ fun CaramelTextField(
     label: String? = null,
     placeholder: String = "",
     minLines: Int = 1,
-    maxLines: Int = 8,
+    maxLines: Int = 6,
     singleLine: Boolean = false,
     maxLength: Int? = null,
     enabled: Boolean = true,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
     val colors = LocalCaramelColors.current
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    val bringIntoViewRequester = remember { BringIntoViewRequester() }
+    val scope = rememberCoroutineScope()
+    Column(
+        modifier = modifier
+            .bringIntoViewRequester(bringIntoViewRequester)
+            .onFocusEvent { focusState ->
+                if (focusState.isFocused) {
+                    scope.launch { bringIntoViewRequester.bringIntoView() }
+                }
+            },
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
         if (label != null) {
             Text(label, style = MaterialTheme.typography.titleMedium)
         }
@@ -238,7 +258,9 @@ fun CaramelTextField(
                     fontSize = MaterialTheme.typography.bodyLarge.fontSize,
                 ),
                 cursorBrush = SolidColor(colors.accentStart),
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(if (singleLine) Modifier else Modifier.heightIn(max = 168.dp)),
                 decorationBox = { inner ->
                     Box {
                         if (value.isEmpty()) {

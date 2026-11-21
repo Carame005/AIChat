@@ -33,7 +33,7 @@ Clone on another PC, download the model + server binaries, build the app, and se
 
 ## Minimum specs (Q4 / Q5)
 
-Both quants are **Chaos Unknown 12B** ([mradermacher GGUF](https://huggingface.co/mradermacher/Chaos-Unknown-12b-GGUF)). App prompt budget defaults to **8192** tokens; the server runs **-c 12288** with **-np 2** (chat + summary slots, shared KV).
+Both quants are **Chaos Unknown 12B** ([mradermacher GGUF](https://huggingface.co/mradermacher/Chaos-Unknown-12b-GGUF)). App prompt budget defaults to **8192** tokens; the server runs **-c 12288** with **-np 2** (chat + summary slots, shared KV). Raise `-c` to **14336** in `start-server.bat` if you have spare VRAM and long-chat summaries still fail.
 
 | | **Q4_K_M** | **Q5_K_M** |
 |---|---|---|
@@ -156,7 +156,7 @@ Use **Test connection** in Settings, or send a test message.
 1. Start the server on the PC and leave it running.
 2. Open CaramelAI on the phone.
 3. Create or import a character, pick a persona, chat.
-4. Send = new message; empty field + **Continue** extends the last bot reply (useful after token truncation).
+4. Send = new message; empty field + **Continue** skips your turn so the bot keeps talking in a new message (when a reply felt short or you want the scene to keep going).
 
 ---
 

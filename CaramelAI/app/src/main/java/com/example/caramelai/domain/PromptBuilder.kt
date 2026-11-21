@@ -12,6 +12,8 @@ data class PromptBuildResult(
     val newSummaryUpToMessageId: String? = null,
     /** Messages dropped from the prompt window that should be folded into the summary. */
     val droppedForSummary: List<MessageEntity> = emptyList(),
+    /** True when the live recent window did not fit and was truncated for this prompt. */
+    val recentTruncated: Boolean = false,
 )
 
 class PromptBuilder {
@@ -62,6 +64,8 @@ class PromptBuilder {
         pinnedMemory: String = "",
         summaryUpToMessageId: String? = null,
         strengthenStyleNote: Boolean = false,
+        softTargetRatio: Float = HISTORY_SOFT_TARGET_RATIO,
+        continueRejectedOpening: String? = null,
     ): PromptBuildResult {
         val userName = persona?.name?.takeIf { it.isNotBlank() } ?: fallbackUserName
         val includeExamples = history.size < EXAMPLE_DIALOGUE_MESSAGE_LIMIT
@@ -92,21 +96,39 @@ class PromptBuilder {
             .map { it.content }
             .reversed()
 
-        val tailNotes = mutableListOf<String>()
-        if (continueMode && visibleHistory.lastOrNull()?.role == MessageRole.ASSISTANT) {
-            val previousReply = visibleHistory.lastOrNull { it.role == MessageRole.ASSISTANT }?.content.orEmpty()
-            tailNotes += buildContinueCue(character.name, userName, previousReply)
+        val continuing = continueMode &&
+            visibleHistory.lastOrNull()?.role == MessageRole.ASSISTANT
+
+        // Standing notes sit before the latest user message so the real reply
+        // stays closest to generation. Action cues (continue/regen/revise) stay last.
+        val standingNotes = mutableListOf<String>()
+        standingNotes += buildStyleNote(recentAssistant, strengthen = strengthenStyleNote)
+        if (continuing) {
+            standingNotes += buildContinueTurnNote(character.name, userName)
+        } else {
+            standingNotes += buildTurnNote(character.name, userName)
+        }
+
+        val actionNotes = mutableListOf<String>()
+        if (continuing) {
+            actionNotes += buildContinueCue(
+                characterName = character.name,
+                userName = userName,
+                rejectedOpening = continueRejectedOpening,
+            )
+        }
+        if (avoidTexts.isNotEmpty() && revisionInstruction.isNullOrBlank()) {
+            actionNotes += buildRegenerateAvoidCue(character.name, userName, avoidTexts)
         }
         val revision = revisionInstruction?.trim().orEmpty()
         if (revision.isNotEmpty()) {
-            tailNotes += buildReviseCue(character.name, userName, revision, avoidTexts)
-        } else if (avoidTexts.isNotEmpty()) {
-            tailNotes += buildRegenerateAvoidCue(character.name, userName, avoidTexts)
+            // Absolute last: instruction-following beats style/turn notes.
+            actionNotes += buildReviseCue(character.name, userName, revision, avoidTexts)
         }
-        tailNotes += buildStyleNote(recentAssistant, strengthen = strengthenStyleNote)
-        tailNotes += buildTurnNote(character.name, userName)
 
-        val notesCost = tailNotes.sumOf { estimateTokens(it) + 8 }
+        val standingBlock = joinStandingNotes(character.name, standingNotes)
+        val notesCost = estimateTokens(standingBlock) + 8 +
+            actionNotes.sumOf { estimateTokens(it) + 8 }
         val historyBudget = (remainingAfterSystem - notesCost)
             .coerceAtLeast(MIN_HISTORY_BUDGET)
 
@@ -115,7 +137,7 @@ class PromptBuilder {
             characterName = character.name,
             userName = userName,
             budget = historyBudget,
-            softTargetRatio = HISTORY_SOFT_TARGET_RATIO,
+            softTargetRatio = softTargetRatio,
         )
 
         val chatMessages = selection.kept.map { message ->
@@ -128,30 +150,137 @@ class PromptBuilder {
             )
         }.toMutableList()
 
-        for (note in tailNotes) {
-            chatMessages += ChatMessageDto(
-                role = MessageRole.USER,
-                content = withSpeakerPrefix(userName, note),
-            )
+        val standingDto = ChatMessageDto(role = MessageRole.USER, content = standingBlock)
+        val lastUserIndex = chatMessages.indexOfLast { it.role == MessageRole.USER }
+        // Only bury notes under the latest user turn when that turn is last in history.
+        // If history ends on assistant, notes must trail so the prompt still ends on user.
+        val insertBeforeUser = lastUserIndex >= 0 &&
+            visibleHistory.lastOrNull()?.role == MessageRole.USER
+        if (insertBeforeUser) {
+            chatMessages.add(lastUserIndex, standingDto)
+        } else {
+            chatMessages += standingDto
+        }
+        for (note in actionNotes) {
+            chatMessages += ChatMessageDto(role = MessageRole.USER, content = note)
         }
 
+        val hasPriorContext = summary.isNotBlank() || !summaryUpToMessageId.isNullOrBlank()
         val systemMessage = ChatMessageDto(role = MessageRole.SYSTEM, content = system)
         return PromptBuildResult(
-            messages = listOf(systemMessage) + normalizeAlternatingRoles(chatMessages),
+            messages = listOf(systemMessage) + normalizeAlternatingRoles(
+                chatMessages,
+                hasPriorContext = hasPriorContext,
+            ),
             newSummaryUpToMessageId = selection.newCutMessageId,
             droppedForSummary = selection.dropped,
+            recentTruncated = selection.recentTruncated,
         )
+    }
+
+    /**
+     * True when [newCut] is strictly after [currentCut] in [history] order.
+     * Missing ids are treated as not ahead (reject the update).
+     */
+    fun isCutAhead(
+        history: List<MessageEntity>,
+        currentCut: String?,
+        newCut: String?,
+    ): Boolean {
+        if (newCut.isNullOrBlank()) return false
+        val newIndex = history.indexOfFirst { it.id == newCut }
+        if (newIndex < 0) return false
+        if (currentCut.isNullOrBlank()) return true
+        val currentIndex = history.indexOfFirst { it.id == currentCut }
+        if (currentIndex < 0) return true
+        return newIndex > currentIndex
+    }
+
+    data class PendingSummaryWork(
+        val cutId: String?,
+        val dropped: List<MessageEntity>,
+    ) {
+        val hasWork: Boolean get() = dropped.isNotEmpty() || !cutId.isNullOrBlank()
+    }
+
+    /**
+     * Drops already behind [currentCut], or a [proposedCut] that is not ahead,
+     * are cleared so callers do not re-schedule a no-op fold.
+     */
+    fun pendingSummaryWork(
+        history: List<MessageEntity>,
+        currentCut: String?,
+        proposedCut: String?,
+        dropped: List<MessageEntity>,
+    ): PendingSummaryWork {
+        if (dropped.isEmpty() && proposedCut.isNullOrBlank()) {
+            return PendingSummaryWork(cutId = null, dropped = emptyList())
+        }
+        val visibleIds = historyAfterCut(history, currentCut).map { it.id }.toSet()
+        val stillNeeded = dropped.filter { it.id in visibleIds }
+        if (stillNeeded.isEmpty()) {
+            return PendingSummaryWork(cutId = null, dropped = emptyList())
+        }
+        if (proposedCut != null && !isCutAhead(history, currentCut, proposedCut)) {
+            return PendingSummaryWork(cutId = null, dropped = emptyList())
+        }
+        return PendingSummaryWork(cutId = proposedCut, dropped = stillNeeded)
+    }
+
+    /**
+     * True when overflow is large enough to advance the summary cut / run an LLM fold.
+     * Tiny overflows (1–2 turns past the recent window) must stay raw so we do not
+     * fold the live scene every message and wipe current context into a lossy summary.
+     */
+    fun isSignificantFold(
+        dropped: List<MessageEntity>,
+        userName: String,
+        characterName: String,
+    ): Boolean {
+        if (dropped.isEmpty()) return false
+        if (dropped.size >= MIN_FOLD_MESSAGES) return true
+        val tokens = dropped.sumOf { message ->
+            val speaker = if (message.role == MessageRole.USER) userName else characterName
+            messageTokenCost(message.content, speaker)
+        }
+        return tokens >= MIN_FOLD_TOKENS
+    }
+
+    /**
+     * After a cut exists, require a long enough live thread before folding again so
+     * memory does not update on every few messages.
+     */
+    fun shouldAdvanceSummaryCut(
+        history: List<MessageEntity>,
+        currentCut: String?,
+        dropped: List<MessageEntity>,
+        userName: String,
+        characterName: String,
+    ): Boolean {
+        if (!isSignificantFold(dropped, userName, characterName)) return false
+        if (currentCut.isNullOrBlank()) return true
+        val liveCount = historyAfterCut(history, currentCut)
+            .count { it.role != MessageRole.SYSTEM }
+        return liveCount >= MIN_MESSAGES_AFTER_CUT_BEFORE_REFOLD
     }
 
     data class HistorySelection(
         val kept: List<MessageEntity>,
+        /** Hard-overflow only: safe to fold into long-term memory / advance the cut. */
         val dropped: List<MessageEntity>,
         val newCutMessageId: String?,
+        /** True when the protected recent window itself did not fit the budget. */
+        val recentTruncated: Boolean = false,
     )
 
     /**
-     * Fills from newest to oldest. If over budget, trims down to [softTargetRatio] of budget
-     * so the next turns can append without shifting the window every message.
+     * Fills from newest to oldest. A recent window is never soft-trimmed so the
+     * live thread stays in the prompt.
+     *
+     * Permanent [HistorySelection.dropped] / cut only reflect **hard** overflow
+     * (what does not fit at ratio 1.0). [softTargetRatio] below 1.0 may omit extra
+     * older turns from [HistorySelection.kept] for KV headroom without advancing
+     * the summary cut.
      */
     fun selectHistoryWithinBudget(
         history: List<MessageEntity>,
@@ -163,37 +292,144 @@ class PromptBuilder {
         if (history.isEmpty()) {
             return HistorySelection(emptyList(), emptyList(), null)
         }
-        val kept = mutableListOf<MessageEntity>()
-        var used = 0
+
+        val recent = selectRecentWindow(history, characterName, userName, budget)
+        val recentIds = recent.map { it.id }.toSet()
+        var recentUsed = recent.sumOf { message ->
+            val speaker = if (message.role == MessageRole.USER) userName else characterName
+            messageTokenCost(message.content, speaker)
+        }
+        // Recent floor does not fit: trim the prompt, but never fold live-thread
+        // messages into memory. Only messages older than the recent window may cut.
+        if (recentUsed > budget) {
+            val fitted = mutableListOf<MessageEntity>()
+            var used = 0
+            for (message in recent.asReversed()) {
+                val speaker = if (message.role == MessageRole.USER) userName else characterName
+                val cost = messageTokenCost(message.content, speaker)
+                if (used + cost > budget && fitted.isNotEmpty()) break
+                fitted.add(0, message)
+                used += cost
+            }
+            val olderDropped = history.filter {
+                it.id !in recentIds && it.role != MessageRole.SYSTEM
+            }
+            return HistorySelection(
+                kept = fitted,
+                dropped = olderDropped,
+                newCutMessageId = olderDropped.lastOrNull()?.id,
+                recentTruncated = true,
+            )
+        }
+
+        val older = history.filter { it.id !in recentIds && it.role != MessageRole.SYSTEM }
+        val olderBudget = (budget - recentUsed).coerceAtLeast(0)
+        val olderKept = mutableListOf<MessageEntity>()
+        var olderUsed = 0
         var overflowed = false
+        for (message in older.asReversed()) {
+            val speaker = if (message.role == MessageRole.USER) userName else characterName
+            val cost = messageTokenCost(message.content, speaker)
+            if (olderUsed + cost > olderBudget) {
+                overflowed = true
+                break
+            }
+            olderKept.add(0, message)
+            olderUsed += cost
+        }
+
+        val hardKeptIds = (olderKept + recent).map { it.id }.toSet()
+        val hardDropped = if (overflowed) {
+            history.filter { it.id !in hardKeptIds && it.role != MessageRole.SYSTEM }.toMutableList()
+        } else {
+            mutableListOf()
+        }
+
+        // Soft-trim only affects this prompt's kept window — never the permanent cut.
+        if (softTargetRatio < 1.0f) {
+            val softBudget = (olderBudget * softTargetRatio).toInt().coerceAtLeast(0)
+            while (olderKept.isNotEmpty() && olderUsed > softBudget) {
+                val removed = olderKept.removeAt(0)
+                val speaker = if (removed.role == MessageRole.USER) userName else characterName
+                olderUsed -= messageTokenCost(removed.content, speaker)
+            }
+        }
+
+        if (!overflowed && softTargetRatio >= 1.0f && olderKept.size == older.size) {
+            return HistorySelection(olderKept + recent, emptyList(), null)
+        }
+
+        val aligned = preferUserLedWindow(olderKept + recent, recent.size, history)
+        // Only fold alignment strips into permanent memory on hard overflow.
+        // Soft-trim must never advance the summary cut.
+        if (overflowed) {
+            for (message in aligned.removed) {
+                if (hardDropped.none { it.id == message.id }) {
+                    hardDropped += message
+                }
+            }
+            val keptIds = aligned.kept.map { it.id }.toSet()
+            hardDropped.removeAll { it.id in keptIds }
+            hardDropped.sortBy { msg -> history.indexOfFirst { it.id == msg.id } }
+        }
+        val hardCut = hardDropped.lastOrNull()?.id
+        return HistorySelection(aligned.kept, hardDropped, hardCut)
+    }
+
+    data class UserLedAlignment(
+        val kept: List<MessageEntity>,
+        val removed: List<MessageEntity>,
+    )
+
+    /** Prefer starting the kept window on a user turn (never strip the recent floor). */
+    private fun preferUserLedWindow(
+        messages: List<MessageEntity>,
+        recentSize: Int,
+        history: List<MessageEntity>,
+    ): UserLedAlignment {
+        val kept = messages.toMutableList()
+        val removed = mutableListOf<MessageEntity>()
+        while (
+            kept.size > recentSize &&
+            kept.size > 1 &&
+            kept.first().role == MessageRole.ASSISTANT
+        ) {
+            removed += kept.removeAt(0)
+        }
+        if (kept.isNotEmpty() && kept.first().role == MessageRole.ASSISTANT) {
+            val firstId = kept.first().id
+            val indexInHistory = history.indexOfFirst { it.id == firstId }
+            if (indexInHistory > 0) {
+                val previous = history[indexInHistory - 1]
+                if (previous.role == MessageRole.USER && previous.id !in kept.map { it.id }) {
+                    kept.add(0, previous)
+                }
+            }
+        }
+        return UserLedAlignment(kept, removed)
+    }
+
+    /** Newest messages that must stay in the prompt (live thread). */
+    fun selectRecentWindow(
+        history: List<MessageEntity>,
+        characterName: String,
+        userName: String,
+        totalBudget: Int,
+    ): List<MessageEntity> {
+        val floor = RECENT_TOKEN_FLOOR.coerceAtMost((totalBudget * 0.55f).toInt().coerceAtLeast(MIN_HISTORY_BUDGET))
+        val recent = mutableListOf<MessageEntity>()
+        var used = 0
         for (message in history.asReversed()) {
             if (message.role == MessageRole.SYSTEM) continue
             val speaker = if (message.role == MessageRole.USER) userName else characterName
             val cost = messageTokenCost(message.content, speaker)
-            if (used + cost > budget && kept.isNotEmpty()) {
-                overflowed = true
-                break
-            }
-            kept.add(0, message)
+            val hitFloor = used + cost > floor && recent.size >= MIN_RECENT_MESSAGES
+            if (hitFloor) break
+            recent.add(0, message)
             used += cost
+            if (recent.size >= MAX_RECENT_MESSAGES && used >= floor) break
         }
-
-        if (!overflowed) {
-            return HistorySelection(kept, emptyList(), null)
-        }
-
-        val softBudget = (budget * softTargetRatio).toInt().coerceAtLeast(MIN_HISTORY_BUDGET)
-        while (kept.size > 1 && used > softBudget) {
-            val removed = kept.removeAt(0)
-            val speaker = if (removed.role == MessageRole.USER) userName else characterName
-            used -= messageTokenCost(removed.content, speaker)
-        }
-
-        val keptIds = kept.map { it.id }.toSet()
-        val dropped = history.filter { it.id !in keptIds && it.role != MessageRole.SYSTEM }
-        // Cut point = last dropped message id (everything after it is kept).
-        val newCut = dropped.lastOrNull()?.id
-        return HistorySelection(kept, dropped, newCut)
+        return recent
     }
 
     fun historyAfterCut(
@@ -243,40 +479,26 @@ class PromptBuilder {
     }
 
     /**
-     * OOC cue for "skip my turn" / truncated replies: keep writing the same assistant
-     * message instead of starting a fresh answer to the previous user turn.
+     * OOC cue for Continue: the user wants the bot to keep talking — a new
+     * assistant message that carries the thread forward (not a mid-sentence patch).
+     * The previous reply is already in history; we do not quote it (avoids echo).
      */
     fun buildContinueCue(
         characterName: String,
         userName: String,
-        previousReply: String,
-    ): String {
-        val trimmed = previousReply.trimEnd()
-        val incomplete = trimmed.isNotEmpty() && trimmed.last() !in COMPLETE_ENDINGS
-        val tail = when {
-            trimmed.isEmpty() -> ""
-            trimmed.length <= MAX_CONTINUE_TAIL_CHARS -> trimmed
-            else -> "…" + trimmed.takeLast(MAX_CONTINUE_TAIL_CHARS)
+        rejectedOpening: String? = null,
+    ): String = buildString {
+        append("(OOC: $userName wants you to KEEP TALKING as $characterName. ")
+        append("Write a NEW in-character message that continues the same thread — ")
+        append("develop the moment, add the next beat, action, feeling, or dialogue. ")
+        append("Do not wait for $userName. Do not speak as $userName. ")
+        append("Do not repeat, rephrase, or summarize your previous message; ")
+        append("do not restart the scene or re-answer an older $userName line.")
+        val rejected = rejectedOpening?.trim().orEmpty()
+        if (rejected.isNotEmpty()) {
+            append(" Do not start like: \"$rejected\".")
         }
-        return buildString {
-            append("(OOC: Continue your previous $characterName reply in-character. ")
-            append("This is NOT a new turn and NOT a new answer to $userName. ")
-            append("Do not restart from the beginning. Do not rephrase, summarize, or repeat ")
-            append("what you already wrote. Do not re-ask or re-answer $userName's earlier message. ")
-            if (incomplete) {
-                append("Your previous text was cut off mid-sentence — resume exactly where it stopped. ")
-            } else {
-                append("Keep going with the next beat, action, or dialogue of the SAME reply. ")
-            }
-            append("Output ONLY the new continuation text. Do not speak as $userName.")
-            if (tail.isNotEmpty()) {
-                append(" Your previous reply ended with:\n\"\"\"\n")
-                append(tail)
-                append("\n\"\"\")")
-            } else {
-                append(')')
-            }
-        }
+        append(')')
     }
 
     /**
@@ -296,17 +518,21 @@ class PromptBuilder {
             ?.take(MAX_AVOID_CHARS_PER_VARIANT)
             .orEmpty()
         return buildString {
-            append("(OOC: Rewrite your last reply as $characterName. ")
-            append("Follow these instructions exactly: \"${instruction.trim()}\". ")
-            append("Stay in character, answer $userName's latest message, and output only the new reply. ")
+            append("(OOC: PRIORITY — rewrite your last reply as $characterName. ")
+            append("You MUST apply this change (it overrides style habits): \"${instruction.trim()}\". ")
+            append("Stay in character. Answer $userName's latest message. Output ONLY the new reply. ")
             if (last.isNotEmpty()) {
-                append("Treat the previous version below as feedback: keep what still fits, ")
-                append("change what the instructions ask for, and do not copy it word-for-word. ")
-                append("Previous version:\n---\n$last\n---)")
+                append("Previous version is feedback only — change what the instruction asks for; ")
+                append("do not copy it word-for-word.\nPrevious:\n---\n$last\n---)")
             } else {
                 append(')')
             }
         }
+    }
+
+    fun joinStandingNotes(characterName: String, notes: List<String>): String {
+        val body = notes.joinToString(" ") { it.trim() }.trim()
+        return "[Notes for $characterName: $body]"
     }
 
     fun buildStyleNote(
@@ -339,9 +565,16 @@ class PromptBuilder {
     }
 
     fun buildTurnNote(characterName: String, userName: String): String =
-        "(OOC: Reply ONLY as $characterName to $userName's LATEST message. " +
-            "Never speak, act, think, or decide for $userName. " +
-            "If $userName already answered or accepted something, advance the scene.)"
+        "(OOC: Continue as $characterName, reacting to $userName's last message. " +
+            "$characterName makes their own choices and acts on them; " +
+            "only $userName's own words and actions are off-limits.)"
+
+    /** Standing note used instead of [buildTurnNote] when Continue follows an assistant turn. */
+    fun buildContinueTurnNote(characterName: String, userName: String): String =
+        "(OOC: Keep talking as $characterName — continue your own thread. " +
+            "Do not re-answer an older $userName line. " +
+            "$characterName makes their own choices and acts on them; " +
+            "only $userName's own words and actions are off-limits.)"
 
     fun openingPhrase(text: String, maxWords: Int = 5): String {
         val cleaned = text
@@ -370,6 +603,7 @@ class PromptBuilder {
 
     /**
      * Drops echoed tails/restarts so "continue" does not paste the previous reply again.
+     * Returns empty when a full restart is still mostly a copy of [existing].
      */
     fun trimContinuationOverlap(existing: String, addition: String): String {
         var cleaned = addition.trimStart()
@@ -378,7 +612,7 @@ class PromptBuilder {
         val previous = existing.trimEnd()
         val maxCheck = minOf(previous.length, cleaned.length, MAX_CONTINUE_OVERLAP_CHARS)
 
-        // Model often echoes the ending we showed in the continue cue.
+        // Model may echo the ending of the previous assistant message.
         for (len in maxCheck downTo MIN_CONTINUE_OVERLAP_CHARS) {
             if (cleaned.startsWith(previous.takeLast(len))) {
                 cleaned = cleaned.substring(len).trimStart()
@@ -389,11 +623,20 @@ class PromptBuilder {
 
         // Full restart: continuation begins like the original reply.
         val prefixCheck = minOf(previous.length, cleaned.length, MAX_CONTINUE_RESTART_CHARS)
+        var restarted = false
+        val beforeRestartStrip = cleaned
         for (len in prefixCheck downTo MIN_CONTINUE_RESTART_CHARS) {
             if (cleaned.startsWith(previous.take(len))) {
                 cleaned = cleaned.substring(len).trimStart()
+                restarted = true
                 break
             }
+        }
+        if (restarted &&
+            RepetitionDetector.repetitionScore(beforeRestartStrip, listOf(previous)) >=
+            RepetitionDetector.STRENGTHEN_THRESHOLD
+        ) {
+            return ""
         }
         return cleaned
     }
@@ -425,7 +668,10 @@ class PromptBuilder {
      * - merge consecutive same-role turns
      * - ensure the first turn after system is user
      */
-    fun normalizeAlternatingRoles(messages: List<ChatMessageDto>): List<ChatMessageDto> {
+    fun normalizeAlternatingRoles(
+        messages: List<ChatMessageDto>,
+        hasPriorContext: Boolean = false,
+    ): List<ChatMessageDto> {
         if (messages.isEmpty()) return emptyList()
 
         val merged = mutableListOf<ChatMessageDto>()
@@ -443,11 +689,16 @@ class PromptBuilder {
         }
 
         if (merged.first().role == MessageRole.ASSISTANT) {
+            val filler = if (hasPriorContext) {
+                "(Continue the story.)"
+            } else {
+                "(Begin the scene.)"
+            }
             merged.add(
                 0,
                 ChatMessageDto(
                     role = MessageRole.USER,
-                    content = "(Begin the scene.)",
+                    content = filler,
                 ),
             )
         }
@@ -489,28 +740,11 @@ class PromptBuilder {
             if (!persona?.description.isNullOrBlank()) {
                 appendLine("User persona: ${persona!!.description.trim()}")
             }
-            if (globalBehavior.isNotBlank()) {
-                appendLine()
-                appendLine("Global user preferences (apply to all chats):")
-                appendLine(globalBehavior.trim())
-            }
-            if (pinnedMemory.isNotBlank()) {
-                appendLine()
-                appendLine("Key facts (always true; do not contradict):")
-                appendLine(pinnedMemory.trim())
-            }
-            if (summary.isNotBlank()) {
-                appendLine()
-                appendLine("Story so far:")
-                appendLine(summary.trim())
-            }
             appendLine()
             appendLine("Turn-taking rules (critical):")
             appendLine("- Chat history lines are labeled \"$userName:\" (user) and \"${character.name}:\" (you).")
-            appendLine("- Reply ONLY as ${character.name} to $userName's LATEST message.")
-            appendLine("- Never speak, act, think, or decide for $userName.")
-            appendLine("- Never attribute your own words, questions, or suggestions to $userName.")
-            appendLine("- If $userName already answered or accepted something, advance the scene — do not re-ask the same thing.")
+            appendLine("- Reply only as ${character.name}; do not write $userName's dialogue, actions, or decisions.")
+            appendLine("- ${character.name} drives the scene and ends replies on their own action or line, not by handing the decision back to $userName.")
             appendLine("- Do not summarize the chat or repeat large parts of your last reply.")
             appendLine()
             appendLine("Roleplay formatting:")
@@ -518,6 +752,35 @@ class PromptBuilder {
             appendLine("- Write spoken dialogue in \"quotation marks\".")
             appendLine("- Use **double asterisks** for emphasis when appropriate.")
             appendLine("- Mirror the user's formatting style when they use *, **, or quotes.")
+            // Preferences + memory near the end so long character cards do not bury them.
+            if (globalBehavior.isNotBlank()) {
+                appendLine()
+                appendLine("USER PREFERENCES (follow every reply; tone/pacing/NSFW/SFW/style):")
+                appendLine(globalBehavior.trim())
+            }
+            // Story summary late; live chat turns after this system message are the present.
+            val cleanSummary = SummaryText.stripEphemeralSections(summary)
+            if (cleanSummary.isNotBlank()) {
+                appendLine()
+                appendLine("Story so far:")
+                appendLine("(BACKGROUND only — third-person memory, not the live exchange.)")
+                appendLine(
+                    "(If a \"${SummaryText.PRESENT_MARKER}\" block appears, it is the last " +
+                        "memorized beat at the memory cut — still background. " +
+                        "The labeled chat turns below are the live present.)",
+                )
+                appendLine(cleanSummary.trim())
+                appendLine(
+                    "(The labeled chat turns that follow are MORE RECENT than this summary. " +
+                        "Reply to those turns. Never continue as if a line inside the summary " +
+                        "were the latest user message.)",
+                )
+            }
+            if (pinnedMemory.isNotBlank()) {
+                appendLine()
+                appendLine("KEY FACTS (absolute; never contradict; prefer these over older story details):")
+                appendLine(pinnedMemory.trim())
+            }
             appendLine()
             appendLine("Write only ${character.name}'s next reply. Do not narrate for $userName.")
         }
@@ -544,17 +807,30 @@ class PromptBuilder {
         return (raw * 1.08).toInt().coerceAtLeast(1)
     }
 
-    private companion object {
-        val COMPLETE_ENDINGS = setOf('.', '!', '?', '…', '"', '\u201d', '*')
-        const val MAX_AVOID_VARIANTS = 3
-        const val MAX_AVOID_CHARS_PER_VARIANT = 300
-        const val MAX_CONTINUE_TAIL_CHARS = 280
-        const val MAX_CONTINUE_OVERLAP_CHARS = 220
-        const val MIN_CONTINUE_OVERLAP_CHARS = 16
-        const val MAX_CONTINUE_RESTART_CHARS = 160
-        const val MIN_CONTINUE_RESTART_CHARS = 24
-        const val EXAMPLE_DIALOGUE_MESSAGE_LIMIT = 6
-        const val MIN_HISTORY_BUDGET = 64
+    companion object {
         const val HISTORY_SOFT_TARGET_RATIO = 0.65f
+        /** Always keep at least this many newest non-system messages when possible. */
+        const val MIN_RECENT_MESSAGES = 12
+        const val MAX_RECENT_MESSAGES = 24
+        /** Soft token floor for the live thread (~last several RP turns). */
+        const val RECENT_TOKEN_FLOOR = 4000
+        /**
+         * Do not advance the summary cut / run a fold LLM until at least this many
+         * messages (or [MIN_FOLD_TOKENS]) sit past the recent window.
+         */
+        const val MIN_FOLD_MESSAGES = 10
+        const val MIN_FOLD_TOKENS = 2000
+        /** After a cut exists, wait until the live thread is this long before refolding. */
+        const val MIN_MESSAGES_AFTER_CUT_BEFORE_REFOLD = 16
+
+        private val COMPLETE_ENDINGS = setOf('.', '!', '?', '…', '"', '\u201d', '*')
+        private const val MAX_AVOID_VARIANTS = 3
+        private const val MAX_AVOID_CHARS_PER_VARIANT = 300
+        private const val MAX_CONTINUE_OVERLAP_CHARS = 220
+        private const val MIN_CONTINUE_OVERLAP_CHARS = 16
+        private const val MAX_CONTINUE_RESTART_CHARS = 160
+        private const val MIN_CONTINUE_RESTART_CHARS = 24
+        private const val EXAMPLE_DIALOGUE_MESSAGE_LIMIT = 6
+        private const val MIN_HISTORY_BUDGET = 64
     }
 }
